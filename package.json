@@ -3,8 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "tsx scripts/deploy.ts",
-    "dev": "tsx scripts/dev.ts"
+    "deploy": "tsx --env-file-if-exists=.env scripts/deploy.ts",
+    "deploy:assistant": "tsx --env-file-if-exists=.env scripts/deploy-assistant.ts",
+    "dev": "tsx --env-file-if-exists=.env scripts/dev.ts"
+  },
+  "dependencies": {
+    "telnyx": "^7.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

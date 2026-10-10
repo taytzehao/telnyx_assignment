@@ -75,14 +75,16 @@ describe("handleWebhook", () => {
     const data = await res.json();
 
     expect(data).toEqual({
-      caller_number: "+1234567890",
-      call_session_id: "sess-001",
-      current_node: "greeting",
-      call_count: 1,
-      is_returning_caller: false,
-      last_intent: "greeting",
-      greeting: "Hello! Thanks for calling.",
-      escalation_enabled: false,
+      dynamic_variables: {
+        caller_number: "+1234567890",
+        call_session_id: "sess-001",
+        current_node: "greeting",
+        call_count: 1,
+        is_returning_caller: false,
+        last_intent: "greeting",
+        greeting: "Hello! Thanks for calling.",
+        escalation_enabled: false,
+      },
     });
   });
 
@@ -102,10 +104,10 @@ describe("handleWebhook", () => {
     const res2 = await handleWebhook(req2, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data2 = await res2.json();
 
-    expect(data2.call_count).toBe(2);
-    expect(data2.is_returning_caller).toBe(true);
-    expect(data2.greeting).toContain("Welcome back");
-    expect(data2.greeting).toContain("#2");
+    expect(data2.dynamic_variables.call_count).toBe(2);
+    expect(data2.dynamic_variables.is_returning_caller).toBe(true);
+    expect(data2.dynamic_variables.greeting).toContain("Welcome back");
+    expect(data2.dynamic_variables.greeting).toContain("#2");
   });
 
   it("returns 500 and logs error when the actor throws", async () => {
@@ -165,7 +167,7 @@ describe("handleWebhook", () => {
     const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
-    expect(data.escalation_enabled).toBe(true);
+    expect(data.dynamic_variables.escalation_enabled).toBe(true);
     expect(env.SESSIONS.get).toHaveBeenCalledWith("flag:escalation_enabled");
   });
 
@@ -180,8 +182,8 @@ describe("handleWebhook", () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data.caller_number).toBe("unknown");
-    expect(data.call_count).toBe(1);
+    expect(data.dynamic_variables.caller_number).toBe("unknown");
+    expect(data.dynamic_variables.call_count).toBe(1);
   });
 
   it("calls the CallSession actor with the caller's number as the actor name", async () => {
