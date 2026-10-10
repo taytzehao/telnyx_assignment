@@ -23,3 +23,5 @@ transcripts/
 .DS_Store
 .vscode/
 .idea/
+
+.worktree/
