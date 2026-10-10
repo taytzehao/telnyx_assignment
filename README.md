@@ -23,7 +23,7 @@ Caller (Phone) → Telnyx AI Assistant (Conversation Workflow)
 
 ## Core Components
 
-- **Conversation Workflow** — 19-node graph in `assistant/conversation-flow.json` with 2 speak nodes (Greeting + Goodbye), 16 prompt nodes, and 1 tool node (Hangup). Uses both LLM conditions (32 edges) and a variable comparison edge (`telnyx_conversation_duration_secs >= 600` timeout).
+- **Conversation Workflow** — 19-node graph in `workflow/assistant.config.json` with 2 speak nodes (Greeting + Goodbye), 16 prompt nodes, and 1 tool node (Hangup). Uses both LLM conditions (32 edges) and a variable comparison edge (`telnyx_conversation_duration_secs >= 600` timeout).
 - **MCP Server** — 4 tools served from the Edge Function at `/mcp`: `get_faq`, `create_appointment`, `list_appointments`, `cancel_appointments`.
 - **Stateful Actors**:
   - `CallSession` — per-caller call counting and returning-caller detection.
@@ -60,18 +60,22 @@ cd ..
 
 ### 3. Deploy the AI Assistant
 
+The assistant config lives at `workflow/assistant.config.json` (19-node conversation flow + assistant metadata). The deploy script loads it, validates the graph, injects the webhook URL, and creates/updates the assistant via the Telnyx SDK.
+
 ```bash
-# Set environment variables for the deploy script
-export TELNYX_API_KEY=$(grep TELNYX_API_KEY .env | cut -d= -f2)
-export EDGE_FUNCTION_URL="https://telnyx-webhook-<org>.telnyxcompute.com"
-export MCP_SERVER_URL="https://telnyx-webhook-<org>.telnyxcompute.com/mcp"
+# Option A: pass the edge function URL directly
+npm run deploy:assistant -- --webhook-url https://telnyx-webhook-<org>.telnyxcompute.com
 
-# First run creates the assistant; re-run with ASSISTANT_ID to update
-npx tsx scripts/deploy-assistant.ts
+# Option B: set ASSISTANT_CACHE in .env (the edge function base URL)
+echo 'ASSISTANT_CACHE=https://telnyx-webhook-<org>.telnyxcompute.com' >> .env
+npm run deploy:assistant
+```
 
-# After first run, note the assistant ID and set it:
-export ASSISTANT_ID="assistant-..."
-npx tsx scripts/deploy-assistant.ts
+On first run the script prints the new assistant ID. Set `ASSISTANT_ID` in `.env` for idempotent redeploys:
+
+```bash
+echo 'ASSISTANT_ID=assistant-...' >> .env
+npm run deploy:assistant
 ```
 
 The MCP server URL must be registered as an MCP integration in the Telnyx Portal (AI Assistants → Select assistant → Integrations → Add MCP Server → URL: your Edge Function `/mcp` endpoint).

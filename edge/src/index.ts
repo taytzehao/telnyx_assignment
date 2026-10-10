@@ -6,12 +6,12 @@ export { AppointmentActor } from "./actors/appointment-actor";
 import type { Env } from "./env";
 import { handleWebhook } from "./webhook";
 import { handleMcpRequest } from "./mcp/handler";
+import { handleToolRequest } from "./mcp/tool-handler";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
-    // Liveness/readiness probes — answer before any other work.
     if (
       url.pathname === "/health/liveness" ||
       url.pathname === "/health/readiness"
@@ -19,14 +19,16 @@ export default {
       return new Response("ok");
     }
 
-    // Dynamic webhook variables endpoint.
     if (url.pathname === "/webhook" && req.method === "POST") {
       return handleWebhook(req, env);
     }
 
-    // MCP server endpoint (Streamable HTTP transport).
     if (url.pathname === "/mcp") {
       return handleMcpRequest(req, env);
+    }
+
+    if (url.pathname.startsWith("/tools/") && req.method === "POST") {
+      return handleToolRequest(url.pathname, req, env);
     }
 
     return new Response("not found", { status: 404 });

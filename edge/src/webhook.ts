@@ -76,7 +76,7 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
       isReturningCaller,
     });
 
-    return Response.json(dynamicVars);
+    return Response.json({ dynamic_variables: dynamicVars });
   } catch (error) {
     const latencyMs = Date.now() - start;
     log({
