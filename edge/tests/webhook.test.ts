@@ -156,7 +156,7 @@ describe("handleWebhook", () => {
   });
 
   it("reads escalation flag from KV and returns it", async () => {
-    env.SESSIONS.put("flag:escalation_enabled", "true");
+    env.SESSIONS.put("flag/escalation_enabled", "true");
 
     const req = webhookRequest({
       caller_number: "+3333333333",
@@ -166,7 +166,7 @@ describe("handleWebhook", () => {
     const data = await res.json();
 
     expect(data.escalation_enabled).toBe(true);
-    expect(env.SESSIONS.get).toHaveBeenCalledWith("flag:escalation_enabled");
+    expect(env.SESSIONS.get).toHaveBeenCalledWith("flag/escalation_enabled");
   });
 
   it("handles negative: malformed JSON body uses defaults", async () => {

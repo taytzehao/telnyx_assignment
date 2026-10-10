@@ -6,12 +6,16 @@ compatibility_date = "2026-05-01"
 binding = "MY_TELNYX"
 
 [storage.kv.SESSIONS]
-id = "REPLACE_WITH_KV_NAMESPACE_UUID"
+id = "7ad68141-67a5-4bbc-a75a-cb4c75aa4689"
 
 [[actors]]
 binding = "CALL_SESSIONS"
 type    = "CallSession"
 
+[[actors]]
+binding = "APPOINTMENT_SESSIONS"
+type    = "AppointmentActor"
+
 [edge_compute]
-func_id = ""
+func_id = "4afc7aff-173e-4fcf-935e-266e19f7c283"
 func_name = "telnyx-webhook"

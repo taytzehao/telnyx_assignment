@@ -2,7 +2,7 @@ export interface LogPayload {
   requestId: string;
   caller: string;
   node: string;
-  outcome: "success" | "error";
+  outcome: "success" | "error" | "conflict" | "not_found";
   latencyMs: number;
   error?: string;
   callCount?: number;

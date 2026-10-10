@@ -27,6 +27,10 @@ interface DynamicVariables {
  * the conversation. Reads KV feature flags, updates the caller's
  * CallSession actor, and returns dynamic variables that can influence
  * workflow routing (e.g. `is_returning_caller`, `escalation_enabled`).
+ *
+ * The `greeting` variable is interpolated verbatim by the Greeting speak
+ * node — the speak node delivers the text word-for-word without an LLM
+ * turn, so the greeting content here is exactly what the caller hears.
  */
 export async function handleWebhook(req: Request, env: Env): Promise<Response> {
   const requestId = generateRequestId();
@@ -39,7 +43,7 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
 
   try {
     const escalationEnabled =
-      (await getFlag(env.SESSIONS, "flag:escalation_enabled")) === "true";
+      (await getFlag(env.SESSIONS, "flag/escalation_enabled")) === "true";
 
     const stub = env.CALL_SESSIONS.idFromName(callerNumber);
     const { callCount, lastIntent } = await stub.recordCall(

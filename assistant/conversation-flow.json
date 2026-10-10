@@ -1,0 +1,341 @@
+{
+  "conversation_flow": {
+    "start_node_id": "n_greeting",
+    "nodes": [
+      {
+        "type": "speak",
+        "id": "n_greeting",
+        "name": "Greeting",
+        "message": "{{greeting}} Welcome to ACME Clinic. How can I help you today?"
+      },
+      {
+        "id": "n_intent",
+        "name": "Identify Intent",
+        "instructions": "You are the ACME Clinic assistant. Ask the caller what they need help with today. There are three things you can help with: answering FAQs about our clinic (hours, location, services, fees), managing appointments (book, view, or cancel), or connecting you with a human. If the caller says they do not need help, thank them and end the call. Determine the caller's intent and route accordingly.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_faq",
+        "name": "Answer FAQ",
+        "instructions": "You are answering FAQ questions for ACME Clinic. Use the get_faq tool to retrieve information about hours, location, services, or fees. Provide the information clearly and concisely to the caller. If the caller asks about something outside hours, location, services, or fees, direct them to call our human line. After answering, check if the caller needs anything else.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_appt_menu",
+        "name": "Appointment Menu",
+        "instructions": "Ask the caller which appointment action they need: create a new appointment, list their existing appointments, or cancel an appointment. Wait for their response and route accordingly. If the caller changed their mind, return to the main menu.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_collect_appt",
+        "name": "Collect Appt Details",
+        "instructions": "Collect the date and time for a new appointment from the caller. Appointments are 30-minute slots available between 9 AM and 5 PM. Ask for both the date (e.g., January 15th) and the preferred time (e.g., 10 AM). If the caller provides incomplete information, ask for what is missing. Once you have both a date and a time, proceed to verify the details with the caller.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_verify_create",
+        "name": "Verify Create",
+        "instructions": "Read back the proposed appointment details to the caller: the date and start time. Ask: Shall I go ahead and book this appointment? Only proceed when the caller gives an unqualified confirmation (a clear yes). If the caller wants to change anything about the date or time, route back to collect the new details. If the caller no longer wants to book an appointment, return to the main menu.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_create_appt",
+        "name": "Create Appointment",
+        "instructions": "Use the create_appointment tool to create the appointment with the caller confirmed date and start_time. The tool will return either a success result with the appointment details or a conflict with suggestions for nearby free slots. If the tool returned success, confirm the booking to the caller. If there was a conflict, tell the caller about the conflict and offer the suggested alternative times.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_confirm_book",
+        "name": "Confirm Booking",
+        "instructions": "The appointment has been successfully created. Read the confirmed appointment details (date, start time, and end time) to the caller. Then ask if there is anything else you can help with.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_suggest_alt",
+        "name": "Suggest Alternatives",
+        "instructions": "The requested appointment slot conflicts with an existing booking. Present the suggested alternative free slots to the caller. If the caller picks one of the suggested slots, confirm the new details before booking. If the caller wants a completely different time, route back to collect new details. If the caller wants to do something else, return to the main menu.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_list_appt",
+        "name": "List Appointments",
+        "instructions": "Use the list_appointments tool to retrieve all appointments for the current caller. The tool returns the caller appointment list. Present the results to the caller.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_show_appt",
+        "name": "Show Appointments",
+        "instructions": "Read out the caller appointments from the list results. If there are appointments, list each one with its date and time. If there are no appointments, inform the caller. Then ask if there is anything else you can help with.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_collect_cancel",
+        "name": "Collect Cancel Details",
+        "instructions": "Ask the caller which appointment they want to cancel. They can specify it by the date and time of the appointment, or by the appointment ID if they have one from a previous listing. Collect the cancellation criteria from the caller. Once they have specified what to cancel, proceed to verify the cancellation with the caller.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_verify_cancel",
+        "name": "Verify Cancel",
+        "instructions": "Read back the appointment the caller wants to cancel. Ask: Are you sure you want to cancel this appointment? Only proceed when the caller gives an unqualified confirmation (a clear yes). If the caller wants to cancel a different appointment, route back to collect the new cancellation details. If the caller no longer wants to cancel, return to the main menu.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_cancel_appt",
+        "name": "Cancel Appointments",
+        "instructions": "Use the cancel_appointments tool to cancel the appointment the caller confirmed. Pass cancel_by (time or id) with the appropriate date, start_time, or appointment_id. If the cancellation succeeded, confirm to the caller. If no matching appointment was found, inform the caller and ask them to clarify which appointment they want to cancel.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_confirm_cancel",
+        "name": "Confirm Cancellation",
+        "instructions": "The appointment has been successfully cancelled. Confirm the cancellation details to the caller. Then ask if there is anything else you can help with.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_escalate",
+        "name": "Escalate",
+        "instructions": "Inform the caller that their request cannot be handled by this automated system. Tell them: I am sorry, I am unable to help with that request. Please call our human assistance line at 1-800-ACME-HELP during business hours for further assistance. Once the caller acknowledges, proceed to end the call.",
+        "instructions_mode": "append"
+      },
+      {
+        "id": "n_anything_else",
+        "name": "Anything Else?",
+        "instructions": "Ask the caller: Is there anything else I can help you with? If the caller says yes, return to the main intent detection. If the caller says no or indicates they are done, proceed to the goodbye message.",
+        "instructions_mode": "append"
+      },
+      {
+        "type": "speak",
+        "id": "n_goodbye",
+        "name": "Goodbye",
+        "message": "Thank you for calling ACME Clinic. We appreciate your call and look forward to serving you. Have a wonderful day. Goodbye."
+      },
+      {
+        "type": "tool",
+        "id": "n_hangup",
+        "name": "Hangup",
+        "shared_tool_id": "tool-c197145f-507c-4aae-81af-e27119417232"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_greeting_to_intent",
+        "start_node_id": "n_greeting",
+        "target": { "type": "node", "node_id": "n_intent" },
+        "condition": { "type": "default" }
+      },
+      {
+        "id": "e_intent_to_faq",
+        "start_node_id": "n_intent",
+        "target": { "type": "node", "node_id": "n_faq" },
+        "condition": { "type": "llm", "prompt": "The caller asks about office hours, location, services, or fees." }
+      },
+      {
+        "id": "e_intent_to_appt_menu",
+        "start_node_id": "n_intent",
+        "target": { "type": "node", "node_id": "n_appt_menu" },
+        "condition": { "type": "llm", "prompt": "The caller wants to book, view, or cancel an appointment." }
+      },
+      {
+        "id": "e_intent_to_escalate",
+        "start_node_id": "n_intent",
+        "target": { "type": "node", "node_id": "n_escalate" },
+        "condition": { "type": "llm", "prompt": "The caller request is outside FAQ and appointment management, or they explicitly ask for a human." }
+      },
+      {
+        "id": "e_intent_to_goodbye",
+        "start_node_id": "n_intent",
+        "target": { "type": "node", "node_id": "n_goodbye" },
+        "condition": { "type": "llm", "prompt": "The caller says they do not need any help." }
+      },
+      {
+        "id": "e_intent_timeout_to_goodbye",
+        "start_node_id": "n_intent",
+        "target": { "type": "node", "node_id": "n_goodbye" },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": ">=",
+            "left": { "type": "variable", "name": "telnyx_conversation_duration_secs" },
+            "right": { "type": "number_literal", "value": 600 }
+          }
+        }
+      },
+      {
+        "id": "e_faq_to_escalate",
+        "start_node_id": "n_faq",
+        "target": { "type": "node", "node_id": "n_escalate" },
+        "condition": { "type": "llm", "prompt": "The caller question is not about hours, location, services, or fees, and cannot be answered by this bot." }
+      },
+      {
+        "id": "e_faq_to_anything_else",
+        "start_node_id": "n_faq",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The FAQ question has been answered and the caller has no more questions." }
+      },
+      {
+        "id": "e_appt_menu_to_collect",
+        "start_node_id": "n_appt_menu",
+        "target": { "type": "node", "node_id": "n_collect_appt" },
+        "condition": { "type": "llm", "prompt": "The caller wants to create a new appointment." }
+      },
+      {
+        "id": "e_appt_menu_to_list",
+        "start_node_id": "n_appt_menu",
+        "target": { "type": "node", "node_id": "n_list_appt" },
+        "condition": { "type": "llm", "prompt": "The caller wants to see their existing appointments." }
+      },
+      {
+        "id": "e_appt_menu_to_cancel",
+        "start_node_id": "n_appt_menu",
+        "target": { "type": "node", "node_id": "n_collect_cancel" },
+        "condition": { "type": "llm", "prompt": "The caller wants to cancel an appointment." }
+      },
+      {
+        "id": "e_appt_menu_to_anything_else",
+        "start_node_id": "n_appt_menu",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller changed their mind and does not want appointment management." }
+      },
+      {
+        "id": "e_collect_to_verify_create",
+        "start_node_id": "n_collect_appt",
+        "target": { "type": "node", "node_id": "n_verify_create" },
+        "condition": { "type": "llm", "prompt": "The caller has provided a date and a 30-minute timeslot." }
+      },
+      {
+        "id": "e_verify_create_to_create",
+        "start_node_id": "n_verify_create",
+        "target": { "type": "node", "node_id": "n_create_appt" },
+        "condition": { "type": "llm", "prompt": "The caller explicitly confirms the appointment details with an unqualified yes." }
+      },
+      {
+        "id": "e_verify_create_back_to_collect",
+        "start_node_id": "n_verify_create",
+        "target": { "type": "node", "node_id": "n_collect_appt" },
+        "condition": { "type": "llm", "prompt": "The caller wants to change the date or time of the appointment." }
+      },
+      {
+        "id": "e_verify_create_to_anything_else",
+        "start_node_id": "n_verify_create",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller no longer wants to book an appointment and wants to do something else." }
+      },
+      {
+        "id": "e_create_to_confirm_book",
+        "start_node_id": "n_create_appt",
+        "target": { "type": "node", "node_id": "n_confirm_book" },
+        "condition": { "type": "llm", "prompt": "The create_appointment tool returned a successful result and the appointment was created." }
+      },
+      {
+        "id": "e_create_to_suggest_alt",
+        "start_node_id": "n_create_appt",
+        "target": { "type": "node", "node_id": "n_suggest_alt" },
+        "condition": { "type": "llm", "prompt": "The create_appointment tool returned a conflict with suggested alternative times." }
+      },
+      {
+        "id": "e_list_to_show",
+        "start_node_id": "n_list_appt",
+        "target": { "type": "node", "node_id": "n_show_appt" },
+        "condition": { "type": "llm", "prompt": "The list_appointments tool returned the caller appointment list." }
+      },
+      {
+        "id": "e_show_to_anything_else",
+        "start_node_id": "n_show_appt",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller has reviewed their appointments and is done." }
+      },
+      {
+        "id": "e_collect_cancel_to_verify",
+        "start_node_id": "n_collect_cancel",
+        "target": { "type": "node", "node_id": "n_verify_cancel" },
+        "condition": { "type": "llm", "prompt": "The caller has specified which appointment to cancel by time or ID." }
+      },
+      {
+        "id": "e_verify_cancel_to_cancel",
+        "start_node_id": "n_verify_cancel",
+        "target": { "type": "node", "node_id": "n_cancel_appt" },
+        "condition": { "type": "llm", "prompt": "The caller explicitly confirms the cancellation with an unqualified yes." }
+      },
+      {
+        "id": "e_verify_cancel_back_to_collect",
+        "start_node_id": "n_verify_cancel",
+        "target": { "type": "node", "node_id": "n_collect_cancel" },
+        "condition": { "type": "llm", "prompt": "The caller wants to cancel a different appointment instead." }
+      },
+      {
+        "id": "e_verify_cancel_to_anything_else",
+        "start_node_id": "n_verify_cancel",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller no longer wants to cancel and wants to do something else." }
+      },
+      {
+        "id": "e_cancel_to_confirm_cancel",
+        "start_node_id": "n_cancel_appt",
+        "target": { "type": "node", "node_id": "n_confirm_cancel" },
+        "condition": { "type": "llm", "prompt": "The cancel_appointments tool succeeded and the appointment was cancelled." }
+      },
+      {
+        "id": "e_cancel_back_to_collect",
+        "start_node_id": "n_cancel_appt",
+        "target": { "type": "node", "node_id": "n_collect_cancel" },
+        "condition": { "type": "llm", "prompt": "The cancel_appointments tool returned that no matching appointment was found." }
+      },
+      {
+        "id": "e_suggest_alt_to_verify_create",
+        "start_node_id": "n_suggest_alt",
+        "target": { "type": "node", "node_id": "n_verify_create" },
+        "condition": { "type": "llm", "prompt": "The caller picks one of the suggested alternative slots." }
+      },
+      {
+        "id": "e_suggest_alt_back_to_collect",
+        "start_node_id": "n_suggest_alt",
+        "target": { "type": "node", "node_id": "n_collect_appt" },
+        "condition": { "type": "llm", "prompt": "The caller wants to try a completely different time." }
+      },
+      {
+        "id": "e_suggest_alt_to_anything_else",
+        "start_node_id": "n_suggest_alt",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller wants to do something else instead of booking." }
+      },
+      {
+        "id": "e_confirm_book_to_anything_else",
+        "start_node_id": "n_confirm_book",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller acknowledges the booking." }
+      },
+      {
+        "id": "e_confirm_cancel_to_anything_else",
+        "start_node_id": "n_confirm_cancel",
+        "target": { "type": "node", "node_id": "n_anything_else" },
+        "condition": { "type": "llm", "prompt": "The caller acknowledges the cancellation." }
+      },
+      {
+        "id": "e_escalate_to_goodbye",
+        "start_node_id": "n_escalate",
+        "target": { "type": "node", "node_id": "n_goodbye" },
+        "condition": { "type": "llm", "prompt": "The caller acknowledges the escalation message." }
+      },
+      {
+        "id": "e_anything_else_to_intent",
+        "start_node_id": "n_anything_else",
+        "target": { "type": "node", "node_id": "n_intent" },
+        "condition": { "type": "llm", "prompt": "The caller says they need additional assistance." }
+      },
+      {
+        "id": "e_anything_else_to_goodbye",
+        "start_node_id": "n_anything_else",
+        "target": { "type": "node", "node_id": "n_goodbye" },
+        "condition": { "type": "llm", "prompt": "The caller says they do not need further help and are done." }
+      },
+      {
+        "id": "e_goodbye_to_hangup",
+        "start_node_id": "n_goodbye",
+        "target": { "type": "node", "node_id": "n_hangup" },
+        "condition": { "type": "default" }
+      }
+    ]
+  }
+}
