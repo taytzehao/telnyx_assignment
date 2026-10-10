@@ -3,5 +3,12 @@
   "plugin": [
     "@telnyx/opencode",
     "opencode-plugin-openspec"
-  ]
+  ],
+  "mcp": {
+    "telnyx": {
+      "type": "remote",
+      "url": "https://api.telnyx.com/v2/mcp",
+      "enabled": true
+    }
+  }
 }

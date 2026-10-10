@@ -1,0 +1,83 @@
+{
+  "name": "telnyx-voice-assistant",
+  "instructions": "You are a helpful voice assistant. Follow the conversation workflow to guide the caller through each step. Be concise, clear, and professional.",
+  "model": "zai-org/GLM-5.2",
+  "dynamic_variables_webhook_url": "",
+  "dynamic_variables_webhook_timeout_ms": 5000,
+  "enabled_features": ["telephony"],
+  "mcp_servers": [],
+  "dynamic_variables": {
+    "caller_number": "unknown",
+    "call_count": 0,
+    "is_returning_caller": false,
+    "last_intent": "",
+    "greeting": "Hello! Thanks for calling.",
+    "escalation_enabled": false
+  },
+  "conversation_flow": {
+    "start_node_id": "n_greeting",
+    "nodes": [
+      {
+        "type": "speak",
+        "id": "n_greeting",
+        "name": "Greeting",
+        "message": "Thanks for calling. This call may be recorded for quality and training."
+      },
+      {
+        "type": "prompt",
+        "id": "n_identify_intent",
+        "name": "Identify Intent",
+        "instructions": "Identify what the caller needs. Ask clarifying questions if their request is unclear.",
+        "instructions_mode": "append"
+      },
+      {
+        "type": "prompt",
+        "id": "n_handle",
+        "name": "Handle Request",
+        "instructions": "Help the caller with their request using available tools.",
+        "instructions_mode": "append"
+      },
+      {
+        "type": "prompt",
+        "id": "n_escalate",
+        "name": "Escalate",
+        "instructions": "The caller needs escalation. Let them know you are connecting them to a human agent.",
+        "instructions_mode": "append"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_greeting_to_identify",
+        "start_node_id": "n_greeting",
+        "target": { "type": "node", "node_id": "n_identify_intent" },
+        "condition": { "type": "default" }
+      },
+      {
+        "id": "e_intent_to_handle",
+        "start_node_id": "n_identify_intent",
+        "target": { "type": "node", "node_id": "n_handle" },
+        "condition": { "type": "llm", "prompt": "The caller has a request you can handle directly." }
+      },
+      {
+        "id": "e_intent_to_escalate",
+        "start_node_id": "n_identify_intent",
+        "target": { "type": "node", "node_id": "n_escalate" },
+        "condition": { "type": "llm", "prompt": "The caller has explicitly asked for a human or needs escalation." }
+      },
+      {
+        "id": "e_escalation_flag",
+        "start_node_id": "n_identify_intent",
+        "target": { "type": "node", "node_id": "n_escalate" },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": "==",
+            "left": { "type": "variable", "name": "escalation_enabled" },
+            "right": { "type": "string_literal", "value": "true" }
+          }
+        }
+      }
+    ]
+  }
+}
