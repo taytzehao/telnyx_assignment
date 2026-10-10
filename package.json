@@ -1,0 +1,14 @@
+{
+  "name": "telnyx-assignment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "tsx scripts/deploy.ts",
+    "dev": "tsx scripts/dev.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.5.0"
+  }
+}

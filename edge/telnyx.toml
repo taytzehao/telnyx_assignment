@@ -1,0 +1,17 @@
+name = "telnyx-webhook"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+[telnyx]
+binding = "MY_TELNYX"
+
+[storage.kv.SESSIONS]
+id = "REPLACE_WITH_KV_NAMESPACE_UUID"
+
+[[actors]]
+binding = "CALL_SESSIONS"
+type    = "CallSession"
+
+[edge_compute]
+func_id = ""
+func_name = "telnyx-webhook"
