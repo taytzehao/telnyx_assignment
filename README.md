@@ -173,9 +173,9 @@ The guardrail only requires coverage for the 5 high-value branching nodes (`n_in
 
 ### How to detect the assistant is broken (within 1 minute)
 
-1. **Watch the logs**: Every webhook and MCP tool call emits a structured JSON log line containing `caller`, `node`/`tool`, `outcome`, `latencyMs`, and `requestId`. In the Telnyx Portal, go to your Edge Function's logs. Filter for `"outcome":"error"` — a spike errors within seconds indicates a failure.
+1. **Watch the logs**: Every request (except health probes) ends with one `"event":"request.completed"` JSON line containing `request_id`, `caller`, `node`/`tool`, `outcome`, `status`, and `duration_ms`. Every log line during a request automatically carries the request context: `request_id`, `correlation_id`, `session_id`, and `end_user_target`, read from the `x-request-id`, `x-correlation-id`, `x-session-id`, and `x-end-user-target` headers. A `req_…` ID is generated when `x-request-id` is absent, and a `"level":"warn"` `request.missing_end_user_target` line is logged when `x-end-user-target` is absent. In the Telnyx Portal, go to your Edge Function's logs. Filter for `"outcome":"error"` — a spike errors within seconds indicates a failure.
 
-2. **Latency spikes**: Look for `latencyMs` values over 1000 ms in webhook logs. The Telnyx webhook timeout defaults to 1500 ms; values approaching it predict missed timeouts.
+2. **Latency spikes**: Look for `duration_ms` values over 1000 ms on `request.completed` lines for `/webhook`. The Telnyx webhook timeout defaults to 1500 ms; values approaching it predict missed timeouts.
 
 3. **MCP tool failures**: Filter logs for `tool` entries with `"outcome":"conflict"` or `"outcome":"not_found"` — without unexpected conflict or not-found outcomes, the appointment flow is working correctly.
 
@@ -183,7 +183,7 @@ The guardrail only requires coverage for the 5 high-value branching nodes (`n_in
 
 - `telnyx-edge logs` from the Edge Function — scan for any `"outcome":"error"` entries.
 - The conversation transcript in the Portal — check which workflow node the conversation reached and whether it stayed there. Routing failures appear as the conversation stuck on a node after the caller's response.
-- The `requestId` field in log lines allows correlating webhook calls across the same conversation.
+- The `request_id` field ties together all log lines from one request. Send the same `x-correlation-id` (or `x-session-id`) on every call in a conversation to correlate webhook and tool calls across it.
 
 ### Debugging trail (from development)
 

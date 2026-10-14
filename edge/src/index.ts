@@ -7,11 +7,33 @@ import type { Env } from "./env";
 import { handleWebhook } from "./webhook";
 import { handleMcpRequest } from "./mcp/handler";
 import { handleToolRequest } from "./mcp/tool-handler";
+import { withRequestLogging, type Handler } from "./lib/middleware";
+
+const route: Handler = async (req, env) => {
+  const url = new URL(req.url);
+
+  if (url.pathname === "/webhook" && req.method === "POST") {
+    return handleWebhook(req, env);
+  }
+
+  if (url.pathname === "/mcp") {
+    return handleMcpRequest(req, env);
+  }
+
+  if (url.pathname.startsWith("/tools/") && req.method === "POST") {
+    return handleToolRequest(url.pathname, req, env);
+  }
+
+  return new Response("not found", { status: 404 });
+};
+
+const handle = withRequestLogging(route);
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
+    // Health probes are answered before request logging to keep logs quiet.
     if (
       url.pathname === "/health/liveness" ||
       url.pathname === "/health/readiness"
@@ -19,18 +41,6 @@ export default {
       return new Response("ok");
     }
 
-    if (url.pathname === "/webhook" && req.method === "POST") {
-      return handleWebhook(req, env);
-    }
-
-    if (url.pathname === "/mcp") {
-      return handleMcpRequest(req, env);
-    }
-
-    if (url.pathname.startsWith("/tools/") && req.method === "POST") {
-      return handleToolRequest(url.pathname, req, env);
-    }
-
-    return new Response("not found", { status: 404 });
+    return handle(req, env);
   },
 };

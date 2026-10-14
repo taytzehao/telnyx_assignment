@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { handleWebhook } from "../src/webhook";
+import { withRequestLogging } from "../src/lib/middleware";
+
+const handle = withRequestLogging(handleWebhook);
+
+function logLines(): Record<string, unknown>[] {
+  return vi
+    .mocked(console.log)
+    .mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
+}
 
 function createMockEnv() {
   const kvStore = new Map<string, string>();
@@ -52,10 +61,13 @@ function createMockEnv() {
 
 type MockEnv = ReturnType<typeof createMockEnv>;
 
-function webhookRequest(body: Record<string, unknown>): Request {
+function webhookRequest(
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+): Request {
   return new Request("https://edge.test/webhook", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -79,7 +91,7 @@ describe("handleWebhook", () => {
       current_node: "greeting",
     });
 
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     expect(res.status).toBe(200);
     const data = await res.json();
 
@@ -104,14 +116,14 @@ describe("handleWebhook", () => {
       caller_number: "+1111111111",
       current_node: "greeting",
     });
-    await handleWebhook(req1, env as unknown as Parameters<typeof handleWebhook>[1]);
+    await handle(req1, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     const req2 = webhookRequest({
       call_session_id: "sess-b",
       caller_number: "+1111111111",
       current_node: "faq",
     });
-    const res2 = await handleWebhook(req2, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res2 = await handle(req2, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data2 = await res2.json();
 
     expect(data2.dynamic_variables.call_count).toBe(2);
@@ -133,38 +145,53 @@ describe("handleWebhook", () => {
       caller_number: "+9999999999",
       current_node: "greeting",
     });
-    const res = await handleWebhook(req, brokenEnv as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, brokenEnv as unknown as Parameters<typeof handleWebhook>[1]);
 
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe("internal_error");
     expect(data.request_id).toMatch(/^req_/);
 
-    const logCalls = vi.mocked(console.log).mock.calls;
-    const hasErrorLog = logCalls.some(
-      (c: unknown[]) => String(c[0]).includes('"outcome":"error"'),
-    );
-    expect(hasErrorLog).toBe(true);
+    const lines = logLines();
+    const failed = lines.find((l) => l.event === "webhook.failed");
+    expect(failed).toMatchObject({
+      level: "error",
+      error: "actor unavailable",
+      request_id: data.request_id,
+      caller: "+9999999999",
+    });
+    const completed = lines.find((l) => l.event === "request.completed");
+    expect(completed).toMatchObject({ outcome: "error", status: 500 });
   });
 
-  it("emits structured log with caller, node, outcome, and latencyMs", async () => {
-    const req = webhookRequest({
-      caller_number: "+2222222222",
+  it("emits request.completed with caller, node, outcome, and duration_ms", async () => {
+    const req = webhookRequest(
+      {
+        caller_number: "+2222222222",
+        call_session_id: "sess-log",
+        current_node: "identify_intent",
+      },
+      { "x-request-id": "req-hdr", "x-end-user-target": "+2222222222" },
+    );
+    await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+
+    const lines = logLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: "info",
+      event: "request.completed",
+      request_id: "req-hdr",
+      end_user_target: "+2222222222",
+      caller: "+2222222222",
+      node: "identify_intent",
       call_session_id: "sess-log",
-      current_node: "identify_intent",
+      outcome: "success",
+      status: 200,
+      call_count: 1,
+      is_returning_caller: false,
     });
-    await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
-
-    const logCalls = vi.mocked(console.log).mock.calls;
-    expect(logCalls.length).toBeGreaterThanOrEqual(1);
-
-    const logged = JSON.parse(logCalls[0][0] as string);
-    expect(logged.caller).toBe("+2222222222");
-    expect(logged.node).toBe("identify_intent");
-    expect(logged.outcome).toBe("success");
-    expect(logged).toHaveProperty("latencyMs");
-    expect(logged).toHaveProperty("requestId");
-    expect(logged).toHaveProperty("timestamp");
+    expect(lines[0]).toHaveProperty("duration_ms");
+    expect(lines[0]).toHaveProperty("timestamp");
   });
 
   it("reads escalation flag from KV and returns it", async () => {
@@ -174,7 +201,7 @@ describe("handleWebhook", () => {
       caller_number: "+3333333333",
       current_node: "greeting",
     });
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
     expect(data.dynamic_variables.escalation_enabled).toBe(true);
@@ -188,7 +215,7 @@ describe("handleWebhook", () => {
       body: "not-json",
     });
 
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -201,7 +228,7 @@ describe("handleWebhook", () => {
       caller_number: "+5555555555",
       current_node: "greeting",
     });
-    await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     expect(env.CALL_SESSIONS.idFromName).toHaveBeenCalledWith("+5555555555");
   });
@@ -211,7 +238,7 @@ describe("handleWebhook", () => {
       caller_number: "+7777777777",
       current_node: "n_appt_menu",
     });
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
     expect(data.dynamic_variables.caller_appointments).toBe("[]");
@@ -228,7 +255,7 @@ describe("handleWebhook", () => {
       caller_number: "+8888888888",
       current_node: "n_appt_menu",
     });
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
     expect(JSON.parse(data.dynamic_variables.caller_appointments)).toEqual(appointments);
@@ -239,7 +266,7 @@ describe("handleWebhook", () => {
       caller_number: "+6666666666",
       current_node: "n_appt_menu",
     });
-    await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+6666666666");
   });
@@ -255,10 +282,15 @@ describe("handleWebhook", () => {
       caller_number: "+9999999999",
       current_node: "n_appt_menu",
     });
-    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const res = await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.dynamic_variables.caller_appointments).toBe("[]");
+
+    const warn = logLines().find(
+      (l) => l.event === "webhook.appointments_lookup_failed",
+    );
+    expect(warn).toMatchObject({ level: "warn", error: "actor unavailable" });
   });
 });

@@ -1,5 +1,6 @@
 import type { Env } from "./env";
-import { log, generateRequestId } from "./lib/logger";
+import { log, errorMessage } from "./lib/logger";
+import { getContext, setContext } from "./lib/context";
 import { getFlag } from "./lib/kv";
 
 interface WebhookPayload {
@@ -34,13 +35,15 @@ interface DynamicVariables {
  * turn, so the greeting content here is exactly what the caller hears.
  */
 export async function handleWebhook(req: Request, env: Env): Promise<Response> {
-  const requestId = generateRequestId();
-  const start = Date.now();
-
   const body = (await req.json().catch(() => ({}))) as WebhookPayload;
   const callerNumber = body.caller_number ?? "unknown";
   const callSessionId = body.call_session_id ?? "unknown";
   const currentNode = body.current_node ?? "unknown";
+  setContext({
+    caller: callerNumber,
+    node: currentNode,
+    call_session_id: callSessionId,
+  });
 
   try {
     const escalationEnabled =
@@ -58,8 +61,11 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
       const apptStub = env.APPOINTMENT_SESSIONS.idFromName(callerNumber);
       const appointments = await apptStub.listAppointments();
       callerAppointments = JSON.stringify(appointments);
-    } catch {
+    } catch (error) {
       // fall back to empty list if actor call fails
+      log.warn("webhook.appointments_lookup_failed", {
+        error: errorMessage(error),
+      });
     }
 
     const dynamicVars: DynamicVariables = {
@@ -76,31 +82,19 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
       caller_appointments: callerAppointments,
     };
 
-    const latencyMs = Date.now() - start;
-    log({
-      requestId,
-      caller: callerNumber,
-      node: currentNode,
+    setContext({
       outcome: "success",
-      latencyMs,
-      callCount,
-      isReturningCaller,
+      call_count: callCount,
+      is_returning_caller: isReturningCaller,
     });
 
     return Response.json({ dynamic_variables: dynamicVars });
   } catch (error) {
-    const latencyMs = Date.now() - start;
-    log({
-      requestId,
-      caller: callerNumber,
-      node: currentNode,
-      outcome: "error",
-      latencyMs,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setContext({ outcome: "error" });
+    log.error("webhook.failed", { error: errorMessage(error) });
 
     return Response.json(
-      { error: "internal_error", request_id: requestId },
+      { error: "internal_error", request_id: getContext()?.request_id },
       { status: 500 },
     );
   }

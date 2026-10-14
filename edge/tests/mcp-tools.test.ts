@@ -5,6 +5,19 @@ import { handleCreateAppointment } from "../src/mcp/tools/create-appointment";
 import { handleListAppointments } from "../src/mcp/tools/list-appointments";
 import { handleCancelAppointments } from "../src/mcp/tools/cancel-appointments";
 import type { Env } from "../src/env";
+import { getContext, runWithContext } from "../src/lib/context";
+
+/** Run `fn` inside a request context, as the request middleware would. */
+function inRequest<T>(fn: () => Promise<T>): Promise<T> {
+  return runWithContext({ request_id: "req_test" }, fn);
+}
+
+function toolCompletedLine(): Record<string, unknown> | undefined {
+  return vi
+    .mocked(console.log)
+    .mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string))
+    .find((l: Record<string, unknown>) => l.event === "tool.completed");
+}
 
 function createMockEnv() {
   const kvStore = new Map<string, string>();
@@ -135,19 +148,23 @@ describe("MCP tool handlers", () => {
       expect(body.found).toBe(false);
     });
 
-    it("emits a structured log with caller, tool, outcome, and latency", async () => {
-      await handleGetFaq(
-        { caller_number: "+1234567890", category: "hours" },
-        env as unknown as Env,
+    it("emits a structured log with request context, caller, tool, and outcome", async () => {
+      await inRequest(() =>
+        handleGetFaq(
+          { caller_number: "+1234567890", category: "hours" },
+          env as unknown as Env,
+        ),
       );
 
-      const logCalls = vi.mocked(console.log).mock.calls;
-      expect(logCalls.length).toBeGreaterThanOrEqual(1);
-      const logged = JSON.parse(logCalls[0][0] as string);
-      expect(logged.caller).toBe("+1234567890");
-      expect(logged.tool).toBe("get_faq");
-      expect(logged.outcome).toBe("success");
-      expect(logged).toHaveProperty("latencyMs");
+      expect(toolCompletedLine()).toMatchObject({
+        level: "info",
+        request_id: "req_test",
+        caller: "+1234567890",
+        tool: "get_faq",
+        outcome: "success",
+        category: "hours",
+        found: true,
+      });
     });
   });
 
@@ -180,16 +197,30 @@ describe("MCP tool handlers", () => {
     });
 
     it("emits a structured log on success", async () => {
-      await handleCreateAppointment(
-        { caller_number: "+1234567890", date: "2026-01-15", start_time: "10:00" },
-        env as unknown as Env,
+      await inRequest(() =>
+        handleCreateAppointment(
+          { caller_number: "+1234567890", date: "2026-01-15", start_time: "10:00" },
+          env as unknown as Env,
+        ),
       );
-      const logCalls = vi.mocked(console.log).mock.calls;
-      const logged = JSON.parse(logCalls[0][0] as string);
-      expect(logged.caller).toBe("+1234567890");
-      expect(logged.tool).toBe("create_appointment");
-      expect(logged.outcome).toBe("success");
-      expect(logged).toHaveProperty("latencyMs");
+      expect(toolCompletedLine()).toMatchObject({
+        caller: "+1234567890",
+        tool: "create_appointment",
+        outcome: "success",
+        date: "2026-01-15",
+        start_time: "10:00",
+      });
+    });
+
+    it("records a conflict outcome in the request context", async () => {
+      const args = { caller_number: "+1234567890", date: "2026-01-15", start_time: "10:00" };
+      await handleCreateAppointment(args, env as unknown as Env);
+
+      const outcome = await inRequest(async () => {
+        await handleCreateAppointment(args, env as unknown as Env);
+        return getContext()?.outcome;
+      });
+      expect(outcome).toBe("conflict");
     });
   });
 
@@ -223,15 +254,17 @@ describe("MCP tool handlers", () => {
     });
 
     it("emits a structured log", async () => {
-      await handleListAppointments(
-        { caller_number: "+1234567890" },
-        env as unknown as Env,
+      await inRequest(() =>
+        handleListAppointments(
+          { caller_number: "+1234567890" },
+          env as unknown as Env,
+        ),
       );
-      const logCalls = vi.mocked(console.log).mock.calls;
-      const logged = JSON.parse(logCalls[0][0] as string);
-      expect(logged.tool).toBe("list_appointments");
-      expect(logged.outcome).toBe("success");
-      expect(logged).toHaveProperty("latencyMs");
+      expect(toolCompletedLine()).toMatchObject({
+        tool: "list_appointments",
+        outcome: "success",
+        count: 0,
+      });
     });
   });
 
@@ -278,22 +311,55 @@ describe("MCP tool handlers", () => {
     });
 
     it("returns 400 when cancel_by='time' but date/start_time missing", async () => {
-      const { status } = await handleCancelAppointments(
-        { caller_number: "+1234567890", cancel_by: "time" },
-        env as unknown as Env,
-      );
+      const { status, outcome } = await inRequest(async () => {
+        const res = await handleCancelAppointments(
+          { caller_number: "+1234567890", cancel_by: "time" },
+          env as unknown as Env,
+        );
+        return { status: res.status, outcome: getContext()?.outcome };
+      });
       expect(status).toBe(400);
+      expect(outcome).toBe("bad_request");
     });
 
     it("emits a structured log", async () => {
-      await handleCancelAppointments(
-        { caller_number: "+1234567890", cancel_by: "time", date: "2026-01-15", start_time: "10:00" },
-        env as unknown as Env,
+      await inRequest(() =>
+        handleCancelAppointments(
+          { caller_number: "+1234567890", cancel_by: "time", date: "2026-01-15", start_time: "10:00" },
+          env as unknown as Env,
+        ),
       );
-      const logCalls = vi.mocked(console.log).mock.calls;
-      const logged = JSON.parse(logCalls[0][0] as string);
-      expect(logged.tool).toBe("cancel_appointments");
-      expect(logged).toHaveProperty("latencyMs");
+      expect(toolCompletedLine()).toMatchObject({
+        tool: "cancel_appointments",
+        outcome: "not_found",
+        cancel_by: "time",
+        found: false,
+      });
+    });
+
+    it("logs tool.failed with error outcome when the actor throws", async () => {
+      vi.mocked(env.APPOINTMENT_SESSIONS.idFromName).mockImplementationOnce(() => {
+        throw new Error("actor unavailable");
+      });
+
+      const { status } = await inRequest(() =>
+        handleCancelAppointments(
+          { caller_number: "+1234567890", cancel_by: "id", appointment_id: "x" },
+          env as unknown as Env,
+        ),
+      );
+
+      expect(status).toBe(500);
+      const failed = vi
+        .mocked(console.log)
+        .mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string))
+        .find((l: Record<string, unknown>) => l.event === "tool.failed");
+      expect(failed).toMatchObject({
+        level: "error",
+        tool: "cancel_appointments",
+        outcome: "error",
+        error: "actor unavailable",
+      });
     });
   });
 });

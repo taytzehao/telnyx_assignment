@@ -1,6 +1,7 @@
 import type { Env } from "../../env";
 import { getFaq } from "../../lib/faq";
-import { log, generateRequestId } from "../../lib/logger";
+import { log, errorMessage } from "../../lib/logger";
+import { setContext } from "../../lib/context";
 
 export interface GetFaqArgs {
   caller_number: string;
@@ -17,36 +18,22 @@ export async function handleGetFaq(
   args: GetFaqArgs,
   env: Env,
 ): Promise<{ status: number; body: GetFaqResult }> {
-  const requestId = generateRequestId();
-  const start = Date.now();
-  const tool = "get_faq";
   const caller = args.caller_number ?? "unknown";
+  setContext({ tool: "get_faq", caller });
 
   try {
     const result = await getFaq(env.SESSIONS, args.category);
 
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: "success",
-      latencyMs: Date.now() - start,
-      tool,
+    setContext({ outcome: "success" });
+    log.info("tool.completed", {
       category: args.category,
       found: result.found,
     });
 
     return { status: 200, body: result };
   } catch (error) {
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: "error",
-      latencyMs: Date.now() - start,
-      tool,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setContext({ outcome: "error" });
+    log.error("tool.failed", { error: errorMessage(error) });
 
     return {
       status: 500,

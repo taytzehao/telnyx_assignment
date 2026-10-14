@@ -1,5 +1,6 @@
 import type { Env } from "../../env";
-import { log, generateRequestId } from "../../lib/logger";
+import { log, errorMessage } from "../../lib/logger";
+import { setContext } from "../../lib/context";
 import type { CreateResult } from "../../actors/appointment-actor";
 
 export interface CreateAppointmentArgs {
@@ -21,10 +22,8 @@ export async function handleCreateAppointment(
   args: CreateAppointmentArgs,
   env: Env,
 ): Promise<{ status: number; body: CreateAppointmentResponse }> {
-  const requestId = generateRequestId();
-  const start = Date.now();
-  const tool = "create_appointment";
   const caller = args.caller_number ?? "unknown";
+  setContext({ tool: "create_appointment", caller });
 
   try {
     const stub = env.APPOINTMENT_SESSIONS.idFromName(caller);
@@ -33,13 +32,8 @@ export async function handleCreateAppointment(
       args.start_time,
     );
 
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: result.success ? "success" : "conflict",
-      latencyMs: Date.now() - start,
-      tool,
+    setContext({ outcome: result.success ? "success" : "conflict" });
+    log.info("tool.completed", {
       date: args.date,
       start_time: args.start_time,
       success: result.success,
@@ -50,15 +44,8 @@ export async function handleCreateAppointment(
       body: result,
     };
   } catch (error) {
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: "error",
-      latencyMs: Date.now() - start,
-      tool,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setContext({ outcome: "error" });
+    log.error("tool.failed", { error: errorMessage(error) });
 
     return {
       status: 500,

@@ -1,26 +1,30 @@
-export interface LogPayload {
-  requestId: string;
-  caller: string;
-  node: string;
-  outcome: "success" | "error" | "conflict" | "not_found";
-  latencyMs: number;
-  error?: string;
-  callCount?: number;
-  isReturningCaller?: boolean;
-  [key: string]: unknown;
-}
+import { getContext } from "./context";
 
-export function generateRequestId(): string {
-  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
+type Level = "info" | "warn" | "error";
+type Fields = Record<string, unknown>;
 
-/** Emit a structured JSON log line. Every webhook call should produce one. */
-export function log(payload: LogPayload): void {
+/**
+ * Emit a structured JSON log line. The active request context (request_id,
+ * correlation_id, session_id, caller, node, ...) is merged in automatically.
+ */
+function emit(level: Level, event: string, fields?: Fields): void {
   console.log(
     JSON.stringify({
       timestamp: new Date().toISOString(),
-      level: payload.outcome === "error" ? "error" : "info",
-      ...payload,
+      level,
+      event,
+      ...getContext(),
+      ...fields,
     }),
   );
+}
+
+export const log = {
+  info: (event: string, fields?: Fields): void => emit("info", event, fields),
+  warn: (event: string, fields?: Fields): void => emit("warn", event, fields),
+  error: (event: string, fields?: Fields): void => emit("error", event, fields),
+};
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

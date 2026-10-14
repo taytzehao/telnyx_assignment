@@ -1,7 +1,8 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Env } from "../env";
 import { createMcpServer } from "./server";
-import { log, generateRequestId } from "../lib/logger";
+import { log, errorMessage } from "../lib/logger";
+import { setContext } from "../lib/context";
 
 const sessions = new Map<string, McpServerWithTransport>();
 
@@ -11,10 +12,8 @@ interface McpServerWithTransport {
 }
 
 export async function handleMcpRequest(req: Request, env: Env): Promise<Response> {
-  const requestId = generateRequestId();
-  const start = Date.now();
-
   const sessionId = req.headers.get("mcp-session-id") ?? undefined;
+  setContext({ mcp_session_id: sessionId });
 
   try {
     if (req.method === "DELETE" && sessionId) {
@@ -24,31 +23,12 @@ export async function handleMcpRequest(req: Request, env: Env): Promise<Response
         await session.transport.close();
         sessions.delete(sessionId);
       }
-      log({
-        requestId,
-        caller: "mcp",
-        node: "mcp",
-        outcome: "success",
-        latencyMs: Date.now() - start,
-        method: "DELETE",
-        sessionId: sessionId ?? "",
-      });
       return new Response(null, { status: 204 });
     }
 
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
-      const res = await session.transport.handleRequest(req);
-      log({
-        requestId,
-        caller: "mcp",
-        node: "mcp",
-        outcome: "success",
-        latencyMs: Date.now() - start,
-        method: req.method,
-        sessionId,
-      });
-      return res;
+      return await session.transport.handleRequest(req);
     }
 
     const newSessionId = crypto.randomUUID();
@@ -63,29 +43,12 @@ export async function handleMcpRequest(req: Request, env: Env): Promise<Response
     const res = await transport.handleRequest(req);
 
     sessions.set(newSessionId, { server, transport });
-
-    log({
-      requestId,
-      caller: "mcp",
-      node: "mcp",
-      outcome: "success",
-      latencyMs: Date.now() - start,
-      method: req.method,
-      sessionId: newSessionId,
-      initialized: true,
-    });
+    setContext({ mcp_session_id: newSessionId, mcp_initialized: true });
 
     return res;
   } catch (error) {
-    log({
-      requestId,
-      caller: "mcp",
-      node: "mcp",
-      outcome: "error",
-      latencyMs: Date.now() - start,
-      method: req.method,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setContext({ outcome: "error" });
+    log.error("mcp.failed", { error: errorMessage(error) });
 
     return Response.json(
       {

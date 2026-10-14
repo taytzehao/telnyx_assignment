@@ -1,5 +1,6 @@
 import type { Env } from "../../env";
-import { log, generateRequestId } from "../../lib/logger";
+import { log, errorMessage } from "../../lib/logger";
+import { setContext } from "../../lib/context";
 import type { CancelResult } from "../../actors/appointment-actor";
 
 export interface CancelAppointmentsArgs {
@@ -20,10 +21,8 @@ export async function handleCancelAppointments(
   args: CancelAppointmentsArgs,
   env: Env,
 ): Promise<{ status: number; body: CancelAppointmentsResponse }> {
-  const requestId = generateRequestId();
-  const start = Date.now();
-  const tool = "cancel_appointments";
   const caller = args.caller_number ?? "unknown";
+  setContext({ tool: "cancel_appointments", caller });
 
   try {
     const stub = env.APPOINTMENT_SESSIONS.idFromName(caller);
@@ -31,6 +30,7 @@ export async function handleCancelAppointments(
 
     if (args.cancel_by === "time") {
       if (!args.date || !args.start_time) {
+        setContext({ outcome: "bad_request" });
         return {
           status: 400,
           body: {
@@ -42,6 +42,7 @@ export async function handleCancelAppointments(
       result = await stub.cancelByTime(args.date, args.start_time);
     } else {
       if (!args.appointment_id) {
+        setContext({ outcome: "bad_request" });
         return {
           status: 400,
           body: {
@@ -53,13 +54,8 @@ export async function handleCancelAppointments(
       result = await stub.cancelById(args.appointment_id);
     }
 
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: result.cancelled ? "success" : "not_found",
-      latencyMs: Date.now() - start,
-      tool,
+    setContext({ outcome: result.cancelled ? "success" : "not_found" });
+    log.info("tool.completed", {
       cancel_by: args.cancel_by,
       found: !!result.cancelled,
     });
@@ -69,15 +65,8 @@ export async function handleCancelAppointments(
       body: result,
     };
   } catch (error) {
-    log({
-      requestId,
-      caller,
-      node: tool,
-      outcome: "error",
-      latencyMs: Date.now() - start,
-      tool,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setContext({ outcome: "error" });
+    log.error("tool.failed", { error: errorMessage(error) });
 
     return {
       status: 500,
