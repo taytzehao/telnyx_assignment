@@ -1,6 +1,6 @@
 ---
 name: update-assistant-workflow
-description: Deploy and re-eval the ACME Clinic assistant when assistant.config.json changes. Auto-use when the user edits, updates, or commits changes to workflow/assistant.config.json or assistant/conversation-flow.json — deploy the updated workflow to Telnyx Edge (assistant update via `npm run deploy:assistant`; auto-switch to full `npm run deploy` when edge/** files are also modified) and run only the clinic-scenario subset relevant to the change, not the entire 24-scenario eval matrix, to reduce test duration and cost. Trigger whenever the user mentions editing the assistant config, conversation flow, workflow nodes or edges, prompt or speak node text, model, or dynamic variables — even if they don't explicitly ask for "deploy" or "eval". Trigger phrases include "update the assistant", "change the workflow", "edit the conversation flow", "update assistant.config.json", "redeploy the assistant", "re-eval the workflow".
+description: Deploy and re-eval the ACME Clinic assistant when assistant.config.json changes. Auto-use when the user edits, updates, or commits changes to workflow/assistant.config.json or workflow/prompts.ts — deploy the updated workflow to Telnyx Edge (assistant update via `npm run deploy:assistant`; auto-switch to full `npm run deploy` when edge/** files are also modified) and run only the clinic-scenario subset relevant to the change, not the entire 24-scenario eval matrix, to reduce test duration and cost. Trigger whenever the user mentions editing the assistant config, conversation flow, workflow nodes or edges, prompt or speak node text, model, or dynamic variables — even if they don't explicitly ask for "deploy" or "eval". Trigger phrases include "update the assistant", "change the workflow", "edit the conversation flow", "update assistant.config.json", "redeploy the assistant", "re-eval the workflow".
 compatibility: telnyx-edge CLI authenticated; .env with TELNYX_API_KEY, ASSISTANT_ID, ASSISTANT_CACHE, ASSISTANT_DESTINATION.
 metadata:
   author: acme-clinic
@@ -11,7 +11,7 @@ Deploy the updated ACME Clinic assistant to Telnyx Edge and run a relevant subse
 
 This skill is the guardrail between editing `workflow/assistant.config.json` and shipping a broken assistant to production. It never skips the offline coverage guardrail, never commits or logs secrets, and never auto-commits the changes.
 
-**Input**: Either `workflow/assistant.config.json` or `assistant/conversation-flow.json` is modified (check via `git status --porcelain`), or the user explicitly asks to update/redeploy/re-eval the workflow. If neither file is modified and the user did not name this skill, do not auto-fire.
+**Input**: Either `workflow/assistant.config.json` or `workflow/prompts.ts` is modified (check via `git status --porcelain`), or the user explicitly asks to update/redeploy/re-eval the workflow. If neither file is modified and the user did not name this skill, do not auto-fire.
 
 **Prompt authoring principles**
 
@@ -47,14 +47,14 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
    git diff --name-only
    git status --porcelain edge/
    ```
-   - If `workflow/assistant.config.json` or `assistant/conversation-flow.json` is in the diff, proceed.
+   - If `workflow/assistant.config.json` or `workflow/prompts.ts` is in the diff, proceed.
    - If only `edge/**` files changed (no assistant config), this skill is not the right tool — stop and tell the user to run the regular deploy workflow instead.
    - Capture `git status --porcelain edge/` for the deploy-mode decision in step 6.
 
 3. **Analyze the diff**
 
    ```bash
-   git diff workflow/assistant.config.json workflow/conversation-flow.json
+   git diff workflow/assistant.config.json workflow/prompts.ts
    ```
    Parse the diff and identify:
    - **Changed node IDs** — keys `id`, `name`, `message` (speak nodes), `instructions` (prompt nodes), `shared_tool_ids`, `instructions_mode`.
@@ -62,22 +62,19 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
    - **High-level field changes** — `model`, `dynamic_variables` defaults, `enabled_features`, `dynamic_variables_webhook_url` / `dynamic_variables_webhook_timeout_ms`, `mcp_servers`, `tool_ids`, `name`.
    - Count how many of the 19 nodes and 35 edges were touched — used to distinguish a localized change from a bulk rewrite.
 
-4. **Sync the conversation-flow snapshot**
+4. **Run the workflow unit tests**
 
-   The offline coverage guardrail reads `assistant/conversation-flow.json`, not `workflow/assistant.config.json`. Keep them in sync before running it:
-   - Load `workflow/assistant.config.json`.
-   - Extract the `conversation_flow` object.
-   - Write `{"conversation_flow": <that object>}` (pretty-printed, 2-space indent) to `assistant/conversation-flow.json`.
-   - If `workflow/assistant.config.json` was not changed but `assistant/conversation-flow.json` was (manual snapshot edit), skip this step — the snapshot is already the source.
-
-   Running the guardrail against a stale snapshot would silently hide workflow drift.
+   ```bash
+   npx tsx workflow/builder.test.ts
+   ```
+   This validates the config graph and that every `@prompt:` marker resolves. `workflow/assistant.config.json` is the single source of truth — there is no separate flow snapshot to keep in sync.
 
 5. **Run the offline coverage guardrail + scenario-shape tests**
 
    ```bash
    npx tsx workflow/eval/eval.test.ts
    ```
-   This validates every clinic scenario's shape and audits that all 16 high-value LLM-conditioned edges in `assistant/conversation-flow.json` are covered by at least one scenario's `target_edge_ids`.
+   This validates every clinic scenario's shape and audits that all 16 high-value LLM-conditioned edges in `workflow/assistant.config.json` are covered by at least one scenario's `target_edge_ids`.
 
    **If it fails and names an uncovered edge ID**: a new LLM edge was added to the workflow without a matching scenario (workflow drift). Stop. The user must add a scenario to `workflow/eval/clinic-scenarios.ts` whose `target_edge_ids` includes the named edge, then re-run this step. Do not proceed to deploy or live eval until the guardrail passes.
 
@@ -89,13 +86,13 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
      ```bash
      npm run deploy
      ```
-     This runs edge `npm install → typecheck → lint → test`, ships with `telnyx-edge ship`, polls `/health/liveness`, then redeploys the assistant (validates config, re-ensures MCP server `acme-clinic-mcp` + the 4 shared tools, replaces `PLACEHOLDER_*_TOOL_ID` strings in `shared_tool_ids`, updates the live assistant via `ASSISTANT_ID`).
+     This runs edge `npm install → typecheck → lint → test`, ships with `telnyx-edge ship`, polls `/health/liveness`, then redeploys the assistant (validates config, re-ensures the 4 shared webhook tools (updating existing ones in place), replaces `PLACEHOLDER_*_TOOL_ID` strings in `shared_tool_ids`, updates the live assistant via `ASSISTANT_ID`).
 
    - Else (config-only change), run the assistant-only deploy:
      ```bash
      npm run deploy:assistant
      ```
-     This is faster: it skips the edge `ship` and just updates the live assistant's config + tools + MCP server.
+     This is faster: it skips the edge `ship` and just updates the live assistant's config + tools.
 
    Do not commit unexpectedly. Never log `TELNYX_API_KEY` or any secret. The hangup tool ID (`tool-c197145f-...`) baked into `n_hangup` is real and should stay — only the `PLACEHOLDER_*` strings inside `shared_tool_ids` arrays get replaced.
 
@@ -103,7 +100,7 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
 
    Load the source of truth at runtime — do not rely on a static mapping table:
    - Read `workflow/eval/clinic-scenarios.ts` to get `allClinicScenarios` (23 clinic scenarios + the boilerplate `Routing: Handle Request`). Each scenario carries `name`, `test_suite`, `instructions`, `rubric`, `target_edge_ids` (optional), `max_duration_seconds` (optional).
-   - Read `assistant/conversation-flow.json` to get the live node/edge graph.
+   - Read `workflow/assistant.config.json` to get the live node/edge graph.
 
    Then apply these rules in order:
 
@@ -137,7 +134,7 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
 
    2. **Lifecycle nodes.** If any of these nodes changed (`n_collect_appt`, `n_verify_create`, `n_create_appt`, `n_confirm_book`, `n_suggest_alt`, `n_list_appt`, `n_show_appt`, `n_collect_cancel`, `n_verify_cancel`, `n_cancel_appt`, `n_confirm_cancel`), include `Lifecycle: Create→List→Cancel→List` — it exercises the full create→list→cancel→list chain end-to-end.
 
-   3. **Node-content edits with no direct edge match.** For changes to node text/instructions on `n_greeting`, `n_faq`, `n_escalate`, `n_anything_else`, `n_goodbye`, `n_hangup`, or any other node not covered above: read each candidate scenario's `instructions` and `rubric` from `clinic-scenarios.ts` and include any scenario whose exercised path traverses the changed node. Use `assistant/conversation-flow.json` reachability to determine path traversal. Show your reasoning in the run report.
+   3. **Node-content edits with no direct edge match.** For changes to node text/instructions on `n_greeting`, `n_faq`, `n_escalate`, `n_anything_else`, `n_goodbye`, `n_hangup`, or any other node not covered above: read each candidate scenario's `instructions` and `rubric` from `clinic-scenarios.ts` and include any scenario whose exercised path traverses the changed node. Use `workflow/assistant.config.json` reachability to determine path traversal. Show your reasoning in the run report.
 
    4. **Changed edge with no scenario match.** The coverage guardrail (step 5) would have caught this and already halted — you should not reach this branch. If you do, stop and ask the user to add a scenario.
 
@@ -169,7 +166,7 @@ When in doubt about where a fix belongs, work top-down: ask whether the root ins
 [1/8] Preconditions: telnyx-edge auth ok, .env present
 [2/8] Changed files: workflow/assistant.config.json
 [3/8] Diff: n_faq instructions (1 node), e_faq_to_escalate condition text (1 edge)
-[4/8] Synced assistant/conversation-flow.json
+[4/8] Workflow unit tests passed ✓
 [5/8] Coverage guardrail: 16/16 edges covered ✓
 [6/8] Deploy: `npm run deploy:assistant` (config-only change, no edge/ files)
        → Assistant updated: assistant-2fb940c7-...
@@ -252,13 +249,12 @@ What would you like to do?
 **Guardrails**
 
 - Always run the offline coverage guardrail (step 5) before live evals. It catches workflow drift for free; live evals cost real API spend.
-- Keep `assistant/conversation-flow.json` in sync with `workflow/assistant.config.json` before running the guardrail. A stale snapshot silently hides drift.
 - Never run the full 24-scenario matrix unless the change is high-level (model / dynamic_variables defaults / top-level metadata) OR the user explicitly asks for full re-eval.
 - Never deploy with unresolved `PLACEHOLDER_*_TOOL_ID` strings outside `shared_tool_ids` arrays — `deploy:assistant` only replaces them inside those arrays. The hangup tool ID is real.
 - Never auto-commit. Committing requires an explicit user go-ahead.
 - Never log or commit `TELNYX_API_KEY` or any secret (per AGENTS.md).
 - Do not fire this skill if only `edge/**` files changed (no assistant config edit) — that path isn't this skill's job.
-- Do not fire if neither `workflow/assistant.config.json` nor `assistant/conversation-flow.json` is modified and the user did not name this skill or request a workflow update.
+- Do not fire if neither `workflow/assistant.config.json` nor `workflow/prompts.ts` is modified and the user did not name this skill or request a workflow update.
 - If a deploy fails, stop and report the underlying error — do not retry blindly or proceed to evals against a stale assistant.
 - If any rubric criterion fails, stop and suggest a fix. Do not auto-commit a broken workflow.
 - Do not narrowly tune a prompt to pass one eval scenario — fix the root cause at the right level (root instruction → edge condition → node instruction) per the Prompt authoring principles. Do not paste the same rule into 3+ nodes; prefer the root instruction or a shared edge condition.

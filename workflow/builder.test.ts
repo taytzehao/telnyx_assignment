@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { validateConfig, withWebhookUrl, resolvePrompts, writeFlowSnapshot } from "./builder";
+import { validateConfig, withWebhookUrl, resolvePrompts } from "./builder";
 import {
   ROOT_INSTRUCTIONS,
   CLINIC_ROLE,
@@ -187,7 +187,7 @@ test("resolvePrompts composes multiple fragments on a node array", () => {
   const resolved = resolvePrompts(cfg);
   const instr = getInstructions(resolved.conversation_flow!.nodes[1])!;
   assert.ok(instr.includes(NODE_JOBS["n_intent"]), "must contain the node job");
-  assert.ok(instr.includes("{{caller_number}}"), "must contain the caller_context fragment");
+  assert.ok(instr.includes("{{telnyx_end_user_target}}"), "must contain the caller_context fragment");
 });
 
 test("resolvePrompts leaves plain-string instructions untouched", () => {
@@ -285,24 +285,6 @@ test("root instruction composes the workflow-wide controller contract", () => {
     resolved.instructions.includes(CONTROLLER_CONTRACT),
     "ROOT_INSTRUCTIONS must include CONTROLLER_CONTRACT so the one-job-per-node rule applies to every node",
   );
-});
-
-console.log("\nwriteFlowSnapshot tests:");
-
-test("writeFlowSnapshot writes the resolved conversation_flow to disk", () => {
-  const snapPath = ".telnyx/test-flow-snapshot.json";
-  if (existsSync(snapPath)) unlinkSync(snapPath);
-  const cfg = resolvePrompts(validConfig());
-  writeFlowSnapshot(cfg, snapPath);
-  try {
-    assert.ok(existsSync(snapPath), "snapshot file created");
-    const written = JSON.parse(readFileSync(snapPath, "utf-8")) as {
-      conversation_flow: { start_node_id: string };
-    };
-    assert.strictEqual(written.conversation_flow.start_node_id, "n_speak");
-  } finally {
-    unlinkSync(snapPath);
-  }
 });
 
 if (!process.exitCode) {

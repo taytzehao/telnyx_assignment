@@ -1,7 +1,7 @@
-import type { Env } from "../../env";
-import { log, errorMessage } from "../../lib/logger";
-import { setContext } from "../../lib/context";
-import type { Appointment } from "../../actors/appointment-actor";
+import type { Env } from "../env";
+import { log, errorMessage } from "../lib/logger";
+import { setContext } from "../lib/context";
+import type { Appointment } from "../actors/appointment-actor";
 
 export interface ListAppointmentsArgs {
   caller_number: string;

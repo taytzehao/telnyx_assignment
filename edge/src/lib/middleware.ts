@@ -22,16 +22,15 @@ function outcomeFromStatus(status: number): Outcome {
  * Wrap a handler so each request runs inside its own log context (seeded from
  * correlation headers) and emits a single `request.completed` line with the
  * status, outcome, and duration once the handler finishes.
+ *
+ * The missing-end-user-target warning is checked after the handler runs, so a
+ * handler that learns the target from the body (the webhook) can set it.
  */
 export function withRequestLogging(handler: Handler): Handler {
   return (req, env) =>
     runWithContext(contextFromRequest(req), async () => {
       const start = performance.now();
       let status = 500;
-
-      if (!getContext()?.end_user_target) {
-        log.warn("request.missing_end_user_target");
-      }
 
       try {
         const res = await handler(req, env);
@@ -45,6 +44,10 @@ export function withRequestLogging(handler: Handler): Handler {
           { status: 500 },
         );
       } finally {
+        if (!getContext()?.end_user_target) {
+          log.warn("request.missing_end_user_target");
+        }
+
         const fields = {
           status,
           outcome: getContext()?.outcome ?? outcomeFromStatus(status),

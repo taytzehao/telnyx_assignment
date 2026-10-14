@@ -1,12 +1,22 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { loadConfig, validateConfig, resolvePrompts, writeFlowSnapshot, withWebhookUrl, withMcpServer, withSharedToolIds } from "../workflow/builder";
+import { loadConfig, validateConfig, resolvePrompts, withWebhookUrl, withSharedToolIds } from "../workflow/builder";
 import { TelnyxAssistantClient } from "../workflow/client";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(here, "..");
 const CONFIG_PATH = join(ROOT_DIR, "workflow", "assistant.config.json");
-const SNAPSHOT_PATH = join(ROOT_DIR, "assistant", "conversation-flow.json");
+
+/**
+ * Every webhook tool sends the caller's identity in this header. Telnyx
+ * interpolates `{{telnyx_end_user_target}}` (the end user's phone number)
+ * into tool header values, so the caller never has to be an LLM-supplied
+ * body parameter. Must match `END_USER_TARGET_HEADER` in
+ * `edge/src/tools/handler.ts`.
+ */
+const END_USER_TARGET_HEADERS = [
+  { name: "X-End-User-Target", value: "{{telnyx_end_user_target}}" },
+];
 
 function parseArgs(argv: string[]): { webhookUrl: string | null } {
   let webhookUrl: string | null = null;
@@ -21,11 +31,6 @@ function parseArgs(argv: string[]): { webhookUrl: string | null } {
 function withWebhookPath(baseUrl: string): string {
   const url = baseUrl.replace(/\/$/, "");
   return url.endsWith("/webhook") ? url : `${url}/webhook`;
-}
-
-function withMcpPath(baseUrl: string): string {
-  const url = baseUrl.replace(/\/$/, "");
-  return url.endsWith("/mcp") ? url : `${url}/mcp`;
 }
 
 function withToolPath(baseUrl: string, tool: string): string {
@@ -50,8 +55,7 @@ async function main(): Promise<void> {
   console.log("\u2713 Config validated");
 
   const resolvedConfig = resolvePrompts(config);
-  writeFlowSnapshot(resolvedConfig, SNAPSHOT_PATH);
-  console.log(`\u2713 Prompts resolved + snapshot synced: ${SNAPSHOT_PATH}`);
+  console.log("\u2713 Prompts resolved");
 
   let edgeBaseUrl: string;
   if (flagUrl) {
@@ -68,14 +72,35 @@ async function main(): Promise<void> {
   }
 
   const webhookUrl = withWebhookPath(edgeBaseUrl);
-  const mcpUrl = withMcpPath(edgeBaseUrl);
   const client = new TelnyxAssistantClient();
 
-  console.log("\u2192 Registering MCP server...");
-  const mcpServerId = await client.ensureMcpServer("acme-clinic-mcp", mcpUrl);
-  console.log(`\u2713 MCP server: ${mcpServerId}`);
-
   console.log("\u2192 Creating shared webhook tools...");
+  const faqToolId = await client.ensureSharedTool(
+    "acme-get-faq",
+    "webhook",
+    {
+      name: "get_faq",
+      description: "Retrieve ACME Clinic FAQ content for one category: hours, location, services, or fees.",
+      url: withToolPath(edgeBaseUrl, "get-faq"),
+      method: "POST",
+      body_parameters: {
+        type: "object",
+        properties: {
+          category: {
+            type: "string",
+            enum: ["hours", "location", "services", "fees"],
+            description: "FAQ category",
+          },
+        },
+        required: ["category"],
+      },
+      headers: END_USER_TARGET_HEADERS,
+      path_parameters: { type: "object", properties: {} },
+      query_parameters: { type: "object", properties: {} },
+    },
+  );
+  console.log(`\u2713 get_faq tool: ${faqToolId}`);
+
   const createToolId = await client.ensureSharedTool(
     "acme-create-appointment",
     "webhook",
@@ -87,13 +112,12 @@ async function main(): Promise<void> {
       body_parameters: {
         type: "object",
         properties: {
-          caller_number: { type: "string", description: "The caller's phone number" },
           date: { type: "string", description: "Appointment date YYYY-MM-DD" },
           start_time: { type: "string", description: "Start time HH:MM" },
         },
-        required: ["caller_number", "date", "start_time"],
+        required: ["date", "start_time"],
       },
-      headers: [],
+      headers: END_USER_TARGET_HEADERS,
       path_parameters: { type: "object", properties: {} },
       query_parameters: { type: "object", properties: {} },
     },
@@ -110,12 +134,9 @@ async function main(): Promise<void> {
       method: "POST",
       body_parameters: {
         type: "object",
-        properties: {
-          caller_number: { type: "string", description: "The caller's phone number" },
-        },
-        required: ["caller_number"],
+        properties: {},
       },
-      headers: [],
+      headers: END_USER_TARGET_HEADERS,
       path_parameters: { type: "object", properties: {} },
       query_parameters: { type: "object", properties: {} },
     },
@@ -133,54 +154,34 @@ async function main(): Promise<void> {
       body_parameters: {
         type: "object",
         properties: {
-          caller_number: { type: "string", description: "The caller's phone number" },
           cancel_by: { type: "string", enum: ["time", "id"], description: "Cancel by time or ID" },
           date: { type: "string", description: "Date (when cancel_by=time)" },
           start_time: { type: "string", description: "Start time (when cancel_by=time)" },
           appointment_id: { type: "string", description: "Appointment ID (when cancel_by=id)" },
         },
-        required: ["caller_number", "cancel_by"],
+        required: ["cancel_by"],
       },
-      headers: [],
+      headers: END_USER_TARGET_HEADERS,
       path_parameters: { type: "object", properties: {} },
       query_parameters: { type: "object", properties: {} },
     },
   );
   console.log(`\u2713 cancel_appointments tool: ${cancelToolId}`);
 
-  console.log("\u2192 Creating shared update_dynamic_variables tool...");
-  const captureToolId = await client.ensureSharedTool(
-    "capture_appointment_details",
-    "update_dynamic_variables",
-    {
-      description:
-        "Capture appointment date and time from the conversation so the booking tool can use them.",
-      name: "capture_appointment_details",
-      updatable_variables: [
-        { name: "appointment_date", description: "The date to book in YYYY-MM-DD format", type: "string" },
-        { name: "appointment_start_time", description: "The start time to book in HH:MM 24-hour format", type: "string" },
-        { name: "cancel_date", description: "The date of the appointment to cancel in YYYY-MM-DD format", type: "string" },
-        { name: "cancel_start_time", description: "The start time of the appointment to cancel in HH:MM format", type: "string" },
-        { name: "cancel_appointment_id", description: "The ID of the appointment to cancel", type: "string" },
-      ],
-    },
-  );
-  console.log(`\u2713 capture_appointment_details tool: ${captureToolId}`);
 
   let configWithWebhook = withWebhookUrl(resolvedConfig, webhookUrl);
-  configWithWebhook = withMcpServer(configWithWebhook, mcpServerId);
   configWithWebhook = withSharedToolIds(configWithWebhook, [
-    captureToolId,
+    faqToolId,
     createToolId,
     listToolId,
     cancelToolId,
   ]);
 
   const toolMap: Record<string, string> = {
+    PLACEHOLDER_FAQ_TOOL_ID: faqToolId,
     PLACEHOLDER_CREATE_TOOL_ID: createToolId,
     PLACEHOLDER_LIST_TOOL_ID: listToolId,
     PLACEHOLDER_CANCEL_TOOL_ID: cancelToolId,
-    PLACEHOLDER_CAPTURE_TOOL_ID: captureToolId,
   };
 
   const flow = configWithWebhook.conversation_flow;
@@ -228,9 +229,8 @@ async function main(): Promise<void> {
 
   console.log(`\n\u2705 Assistant ID: ${assistantId}`);
   console.log(`   Webhook URL: ${webhookUrl}`);
-  console.log(`   MCP server:  ${mcpUrl} (${mcpServerId})`);
   console.log(`   Shared tools:`);
-  console.log(`     capture_appointment_details: ${captureToolId}`);
+  console.log(`     get_faq:                     ${faqToolId}`);
   console.log(`     create_appointment:          ${createToolId}`);
   console.log(`     list_appointments:           ${listToolId}`);
   console.log(`     cancel_appointments:         ${cancelToolId}`);

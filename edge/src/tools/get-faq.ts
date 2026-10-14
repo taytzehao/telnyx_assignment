@@ -1,7 +1,7 @@
-import type { Env } from "../../env";
-import { getFaq } from "../../lib/faq";
-import { log, errorMessage } from "../../lib/logger";
-import { setContext } from "../../lib/context";
+import type { Env } from "../env";
+import { getFaq } from "../lib/faq";
+import { log, errorMessage } from "../lib/logger";
+import { setContext } from "../lib/context";
 
 export interface GetFaqArgs {
   caller_number: string;

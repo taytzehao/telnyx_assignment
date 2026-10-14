@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { handleGetFaq } from "../src/mcp/tools/get-faq";
-import { handleCreateAppointment } from "../src/mcp/tools/create-appointment";
-import { handleListAppointments } from "../src/mcp/tools/list-appointments";
-import { handleCancelAppointments } from "../src/mcp/tools/cancel-appointments";
+import { handleGetFaq } from "../src/tools/get-faq";
+import { handleCreateAppointment } from "../src/tools/create-appointment";
+import { handleListAppointments } from "../src/tools/list-appointments";
+import { handleCancelAppointments } from "../src/tools/cancel-appointments";
+import { handleToolRequest, END_USER_TARGET_HEADER } from "../src/tools/handler";
 import type { Env } from "../src/env";
 import { getContext, runWithContext } from "../src/lib/context";
 
@@ -114,7 +115,7 @@ function minToTime(mins: number): string {
 
 type MockEnv = ReturnType<typeof createMockEnv>;
 
-describe("MCP tool handlers", () => {
+describe("tool handlers", () => {
   let env: MockEnv;
 
   beforeEach(() => {
@@ -360,6 +361,89 @@ describe("MCP tool handlers", () => {
         outcome: "error",
         error: "actor unavailable",
       });
+    });
+  });
+
+  describe("tool endpoint (/tools/*)", () => {
+    function toolRequest(
+      tool: string,
+      body: Record<string, unknown>,
+      endUserTarget?: string,
+    ): Request {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (endUserTarget !== undefined) headers[END_USER_TARGET_HEADER] = endUserTarget;
+      return new Request(`https://edge.test/tools/${tool}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    }
+
+    it("identifies the caller from the end-user-target header", async () => {
+      const res = await handleToolRequest(
+        "/tools/list-appointments",
+        toolRequest("list-appointments", {}, "+15551234567"),
+        env as unknown as Env,
+      );
+      expect(res.status).toBe(200);
+      expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+15551234567");
+    });
+
+    it("ignores a caller_number in the body in favour of the header", async () => {
+      const res = await handleToolRequest(
+        "/tools/create-appointment",
+        toolRequest(
+          "create-appointment",
+          { caller_number: "+19999999999", date: "2026-01-15", start_time: "10:00" },
+          "+15551234567",
+        ),
+        env as unknown as Env,
+      );
+      expect(res.status).toBe(200);
+      expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+15551234567");
+      expect(env.APPOINTMENT_SESSIONS.idFromName).not.toHaveBeenCalledWith("+19999999999");
+    });
+
+    it("reads the header case-insensitively", async () => {
+      const req = new Request("https://edge.test/tools/get-faq", {
+        method: "POST",
+        headers: { "X-End-User-Target": "+15551234567" },
+        body: JSON.stringify({ category: "hours" }),
+      });
+      const res = await inRequest(() =>
+        handleToolRequest("/tools/get-faq", req, env as unknown as Env),
+      );
+      expect(res.status).toBe(200);
+      expect(toolCompletedLine()?.caller).toBe("+15551234567");
+    });
+
+    it("returns 400 when the header is missing", async () => {
+      const res = await handleToolRequest(
+        "/tools/list-appointments",
+        toolRequest("list-appointments", { caller_number: "+15551234567" }),
+        env as unknown as Env,
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("missing_end_user_target");
+      expect(env.APPOINTMENT_SESSIONS.idFromName).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when the header is blank", async () => {
+      const res = await handleToolRequest(
+        "/tools/cancel-appointments",
+        toolRequest("cancel-appointments", { cancel_by: "id", appointment_id: "x" }, "  "),
+        env as unknown as Env,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for an unknown tool", async () => {
+      const res = await handleToolRequest(
+        "/tools/nope",
+        toolRequest("nope", {}, "+15551234567"),
+        env as unknown as Env,
+      );
+      expect(res.status).toBe(404);
     });
   });
 });

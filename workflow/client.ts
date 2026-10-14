@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import Telnyx from "telnyx";
 import type { CreateAssistantRequest, AssistantUpdateParams, Assistant } from "./types";
-import type { SharedToolResponse, ToolCreateParams } from "telnyx/resources/ai/tools";
+import type { SharedToolResponse, ToolCreateParams, ToolUpdateParams } from "telnyx/resources/ai/tools";
 
 export class TelnyxAssistantClient {
   private client: Telnyx;
@@ -30,48 +30,24 @@ export class TelnyxAssistantClient {
     return this.client.ai.assistants.retrieve(id) as Promise<Assistant>;
   }
 
-  async ensureMcpServer(name: string, url: string): Promise<string> {
-    const res = await fetch("https://api.telnyx.com/v2/ai/mcp_servers", {
-      headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { data?: { id: string; name: string }[] };
-      const existing = data.data?.find((s) => s.name === name);
-      if (existing) return existing.id;
-    }
-    const createRes = await fetch("https://api.telnyx.com/v2/ai/mcp_servers", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.TELNYX_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name, url, transport: "streamable_http" }),
-    });
-    if (!createRes.ok) {
-      throw new Error(`Failed to create MCP server: ${await createRes.text()}`);
-    }
-    const created = (await createRes.json()) as { id: string };
-    return created.id;
-  }
-
   async ensureSharedTool(
     displayName: string,
     type: string,
     toolDefinition: Record<string, unknown>,
   ): Promise<string> {
-    const tools = await this.client.ai.tools.list();
-    for await (const tool of tools) {
-      if (tool.display_name === displayName) {
-        return tool.id;
-      }
-    }
     const params: ToolCreateParams = {
       display_name: displayName,
       type,
-      ...Object.fromEntries(
-        Object.entries({ [type]: toolDefinition }).filter(([, v]) => v !== undefined),
-      ),
+      [type]: toolDefinition,
     } as ToolCreateParams;
+    const tools = await this.client.ai.tools.list();
+    for await (const tool of tools) {
+      if (tool.display_name === displayName) {
+        // Push the current definition so redeploys pick up schema/header changes.
+        await this.client.ai.tools.update(tool.id, params as ToolUpdateParams);
+        return tool.id;
+      }
+    }
     const created = (await this.client.ai.tools.create(params)) as SharedToolResponse;
     return created.id;
   }

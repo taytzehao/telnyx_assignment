@@ -7,6 +7,7 @@ import type {
   TestRunStatus,
 } from "./types";
 import type { EvalClient } from "./client";
+import { testCallerId, type CallerStatePreparer } from "./caller-state";
 
 const TERMINAL_STATUSES: TestRunStatus[] = [
   "passed",
@@ -18,6 +19,8 @@ export interface EvalRunnerOptions {
   cachePath?: string;
   pollIntervalMs?: number;
   timeoutMs?: number;
+  /** Resets (and seeds) the test caller's appointments before each run. */
+  callerState?: CallerStatePreparer;
 }
 
 export interface RunOutcome {
@@ -30,38 +33,57 @@ export class EvalRunner {
   private cachePath: string;
   private pollIntervalMs: number;
   private timeoutMs: number;
+  private callerState?: CallerStatePreparer;
 
   constructor(client: EvalClient, options?: EvalRunnerOptions) {
     this.client = client;
     this.cachePath = options?.cachePath ?? ".telnyx/eval-tests.json";
     this.pollIntervalMs = options?.pollIntervalMs ?? 5000;
     this.timeoutMs = options?.timeoutMs ?? 120000;
+    this.callerState = options?.callerState;
   }
 
   async run(scenario: TestScenario): Promise<RunOutcome> {
+    if (scenario.seed_appointments?.length && !this.callerState) {
+      throw new Error(
+        `"${scenario.name}" needs seed_appointments, but the runner has no callerState to create them.`,
+      );
+    }
     const cache = this.readCache();
 
-    let testId = cache[scenario.name];
-    let runResponse: TestRunResult;
-
+    let testId: string | undefined = cache[scenario.name];
     if (testId) {
       try {
-        runResponse = await this.client.triggerRun(testId);
+        // The cache only maps names to IDs; push the current scenario so
+        // edited instructions/rubrics are what actually runs.
+        await this.client.updateTest(testId, scenario);
       } catch (err) {
-        if (this.isNotFoundError(err)) {
-          testId = await this.recreateTest(scenario, cache);
-          runResponse = await this.client.triggerRun(testId);
-        } else {
-          throw err;
-        }
+        if (!this.isNotFoundError(err)) throw err;
+        testId = undefined;
       }
-    } else {
+    }
+    if (!testId) {
       testId = await this.recreateTest(scenario, cache);
+    }
+
+    let runResponse: TestRunResult;
+    try {
+      await this.prepareCaller(testId, scenario);
+      runResponse = await this.client.triggerRun(testId);
+    } catch (err) {
+      if (!this.isNotFoundError(err)) throw err;
+      testId = await this.recreateTest(scenario, cache);
+      await this.prepareCaller(testId, scenario);
       runResponse = await this.client.triggerRun(testId);
     }
 
     const result = await this.pollRun(testId, runResponse.run_id);
     return { testRun: result, scenarioName: scenario.name };
+  }
+
+  /** Each test is its own caller, so start every run from a known appointment state. */
+  private async prepareCaller(testId: string, scenario: TestScenario): Promise<void> {
+    await this.callerState?.prepare(testCallerId(testId), scenario.seed_appointments ?? []);
   }
 
   private async recreateTest(

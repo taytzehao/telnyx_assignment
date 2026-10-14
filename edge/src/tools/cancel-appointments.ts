@@ -1,7 +1,7 @@
-import type { Env } from "../../env";
-import { log, errorMessage } from "../../lib/logger";
-import { setContext } from "../../lib/context";
-import type { CancelResult } from "../../actors/appointment-actor";
+import type { Env } from "../env";
+import { log, errorMessage } from "../lib/logger";
+import { setContext } from "../lib/context";
+import type { CancelResult } from "../actors/appointment-actor";
 
 export interface CancelAppointmentsArgs {
   caller_number: string;

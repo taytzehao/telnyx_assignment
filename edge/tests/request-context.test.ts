@@ -85,6 +85,18 @@ describe("withRequestLogging", () => {
     expect(logLines().filter((l) => l.level === "warn")).toHaveLength(0);
   });
 
+  it("does not warn when the handler sets end_user_target from the body", async () => {
+    await withRequestLogging(async () => {
+      setContext({ end_user_target: "+1555" });
+      return new Response("ok");
+    })(request(), env);
+
+    expect(logLines().filter((l) => l.level === "warn")).toHaveLength(0);
+    expect(logLines().find((l) => l.event === "request.completed")).toMatchObject({
+      end_user_target: "+1555",
+    });
+  });
+
   it("emits one request.completed line with status, outcome, and duration_ms", async () => {
     await withRequestLogging(ok)(request(), env);
 
@@ -196,52 +208,16 @@ describe("router", () => {
     });
   });
 
-  it("carries MCP tool context onto the /mcp request.completed line", async () => {
-    const mcpHeaders = {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-    };
-    const init = await worker.fetch(
-      new Request("https://edge.test/mcp", {
-        method: "POST",
-        headers: mcpHeaders,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-03-26",
-            capabilities: {},
-            clientInfo: { name: "test", version: "1.0.0" },
-          },
-        }),
-      }),
-      env,
-    );
-    const mcpSessionId = init.headers.get("mcp-session-id")!;
-    expect(mcpSessionId).toBeTruthy();
-
-    vi.mocked(console.log).mockClear();
-
+  it("carries tool context onto the /tools request.completed line", async () => {
     const res = await worker.fetch(
-      new Request("https://edge.test/mcp", {
+      new Request("https://edge.test/tools/get-faq", {
         method: "POST",
         headers: {
-          ...mcpHeaders,
-          "mcp-session-id": mcpSessionId,
-          "mcp-protocol-version": "2025-03-26",
-          "x-request-id": "r-mcp",
+          "content-type": "application/json",
+          "x-request-id": "r-tool",
           "x-end-user-target": "+15550002222",
         },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 2,
-          method: "tools/call",
-          params: {
-            name: "get_faq",
-            arguments: { category: "hours", caller_number: "+15550002222" },
-          },
-        }),
+        body: JSON.stringify({ category: "hours" }),
       }),
       env,
     );
@@ -249,13 +225,13 @@ describe("router", () => {
 
     const lines = logLines();
     expect(lines.find((l) => l.event === "tool.completed")).toMatchObject({
-      request_id: "r-mcp",
+      request_id: "r-tool",
       tool: "get_faq",
     });
     expect(lines.find((l) => l.event === "request.completed")).toMatchObject({
-      request_id: "r-mcp",
+      request_id: "r-tool",
+      path: "/tools/get-faq",
       end_user_target: "+15550002222",
-      mcp_session_id: mcpSessionId,
       tool: "get_faq",
       caller: "+15550002222",
       outcome: "success",
