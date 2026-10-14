@@ -16,7 +16,6 @@ export interface LogContext {
   method?: string;
   path?: string;
   caller?: string;
-  node?: string;
   tool?: string;
   outcome?: Outcome;
   [key: string]: unknown;

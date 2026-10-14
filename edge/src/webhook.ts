@@ -8,8 +8,11 @@ interface WebhookPayload {
   current_node?: string;
   /** Telnyx `assistant.initialization` event envelope. */
   data?: {
+    id?: string;
     payload?: {
       telnyx_end_user_target?: string;
+      telnyx_conversation_channel?: string;
+      call_control_id?: string;
       [key: string]: unknown;
     };
   };
@@ -52,10 +55,13 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
   const currentNode = body.current_node ?? "unknown";
   // Telnyx sends no x-end-user-target header to the webhook; the body has it.
   if (endUserTarget) setContext({ end_user_target: endUserTarget });
+  // The initialization event carries no node or session; log what it does
+  // carry. Absent fields are dropped from the log line.
   setContext({
     caller: callerNumber,
-    node: currentNode,
-    call_session_id: callSessionId,
+    channel: body.data?.payload?.telnyx_conversation_channel,
+    call_control_id: body.data?.payload?.call_control_id,
+    event_id: body.data?.id,
   });
 
   try {

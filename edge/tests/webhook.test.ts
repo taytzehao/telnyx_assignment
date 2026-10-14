@@ -163,13 +163,20 @@ describe("handleWebhook", () => {
     expect(completed).toMatchObject({ outcome: "error", status: 500 });
   });
 
-  it("emits request.completed with caller, node, outcome, and duration_ms", async () => {
-    // Telnyx sends the end-user target in the body only, not as a header.
+  it("emits request.completed with caller, initialization fields, outcome, and duration_ms", async () => {
+    // Shape of Telnyx's assistant.initialization event. The end-user target
+    // arrives in the body only, not as a header.
     const req = webhookRequest(
       {
-        data: { payload: { telnyx_end_user_target: "+2222222222" } },
-        call_session_id: "sess-log",
-        current_node: "identify_intent",
+        data: {
+          id: "event_123",
+          event_type: "assistant.initialization",
+          payload: {
+            telnyx_end_user_target: "+2222222222",
+            telnyx_conversation_channel: "phone_call",
+            call_control_id: "v3:abc",
+          },
+        },
       },
       { "x-request-id": "req-hdr" },
     );
@@ -183,15 +190,30 @@ describe("handleWebhook", () => {
       request_id: "req-hdr",
       end_user_target: "+2222222222",
       caller: "+2222222222",
-      node: "identify_intent",
-      call_session_id: "sess-log",
+      channel: "phone_call",
+      call_control_id: "v3:abc",
+      event_id: "event_123",
       outcome: "success",
       status: 200,
       call_count: 1,
       is_returning_caller: false,
     });
+    expect(lines[0]).not.toHaveProperty("node");
+    expect(lines[0]).not.toHaveProperty("call_session_id");
     expect(lines[0]).toHaveProperty("duration_ms");
     expect(lines[0]).toHaveProperty("timestamp");
+  });
+
+  it("omits initialization fields the event does not carry", async () => {
+    const req = webhookRequest({
+      data: { payload: { telnyx_end_user_target: "+2222222222" } },
+    });
+    await handle(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+
+    const completed = logLines().find((l) => l.event === "request.completed")!;
+    expect(completed).not.toHaveProperty("channel");
+    expect(completed).not.toHaveProperty("call_control_id");
+    expect(completed).not.toHaveProperty("event_id");
   });
 
   it("reads escalation flag from KV and returns it", async () => {
