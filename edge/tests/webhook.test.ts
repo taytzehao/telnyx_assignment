@@ -5,6 +5,7 @@ import { handleWebhook } from "../src/webhook";
 function createMockEnv() {
   const kvStore = new Map<string, string>();
   const actorStore = new Map<string, unknown>();
+  const apptStore = new Map<string, unknown[]>();
 
   return {
     SESSIONS: {
@@ -36,6 +37,14 @@ function createMockEnv() {
         })),
       })),
       _actorStore: actorStore,
+    },
+    APPOINTMENT_SESSIONS: {
+      idFromName: vi.fn((callerNumber: string) => ({
+        listAppointments: vi.fn(async () => {
+          return apptStore.get(callerNumber) ?? [];
+        }),
+      })),
+      _apptStore: apptStore,
     },
     MY_TELNYX: {},
   };
@@ -84,6 +93,7 @@ describe("handleWebhook", () => {
         last_intent: "greeting",
         greeting: "Hello! Thanks for calling.",
         escalation_enabled: false,
+        caller_appointments: "[]",
       },
     });
   });
@@ -194,5 +204,61 @@ describe("handleWebhook", () => {
     await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     expect(env.CALL_SESSIONS.idFromName).toHaveBeenCalledWith("+5555555555");
+  });
+
+  it("returns caller_appointments as [] when the caller has no appointments", async () => {
+    const req = webhookRequest({
+      caller_number: "+7777777777",
+      current_node: "n_appt_menu",
+    });
+    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const data = await res.json();
+
+    expect(data.dynamic_variables.caller_appointments).toBe("[]");
+  });
+
+  it("returns caller_appointments as JSON when the caller has appointments", async () => {
+    const appointments = [
+      { id: "appt-1", date: "2026-01-15", start_time: "10:00", end_time: "10:30" },
+      { id: "appt-2", date: "2026-01-20", start_time: "14:00", end_time: "14:30" },
+    ];
+    env.APPOINTMENT_SESSIONS._apptStore.set("+8888888888", appointments);
+
+    const req = webhookRequest({
+      caller_number: "+8888888888",
+      current_node: "n_appt_menu",
+    });
+    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const data = await res.json();
+
+    expect(JSON.parse(data.dynamic_variables.caller_appointments)).toEqual(appointments);
+  });
+
+  it("calls the AppointmentSession actor with the caller's number", async () => {
+    const req = webhookRequest({
+      caller_number: "+6666666666",
+      current_node: "n_appt_menu",
+    });
+    await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+
+    expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+6666666666");
+  });
+
+  it("falls back to [] when the AppointmentSession actor throws", async () => {
+    vi.mocked(env.APPOINTMENT_SESSIONS.idFromName).mockReturnValueOnce({
+      listAppointments: vi.fn(async () => {
+        throw new Error("actor unavailable");
+      }),
+    });
+
+    const req = webhookRequest({
+      caller_number: "+9999999999",
+      current_node: "n_appt_menu",
+    });
+    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.dynamic_variables.caller_appointments).toBe("[]");
   });
 });

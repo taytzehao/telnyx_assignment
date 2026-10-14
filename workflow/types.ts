@@ -50,7 +50,7 @@ export type {
   AssistantMcpServer as MCPServerRef,
 } from "telnyx/resources/ai";
 
-import type { FlowNodeReq, SpeakNodeReq, ToolNodeReq } from "telnyx/resources/ai";
+import type { FlowNodeReq, SpeakNodeReq, ToolNodeReq, AssistantMcpServer } from "telnyx/resources/ai";
 import type { FlowEdge } from "telnyx/resources/ai";
 
 // Discriminated union for workflow nodes (prompt / speak / tool)
@@ -81,3 +81,58 @@ export type Operand =
 
 // Instructions mode — API defaults to "replace", our config sets "append" explicitly
 export type InstructionsMode = "append" | "replace";
+
+// ── Authoring (pre-resolution) config types ──────────────────────────────
+
+/**
+ * Composable prompt instructions: a single string or a list of `@prompt:<name>`
+ * markers and/or plain strings that are joined at deploy time. The array form
+ * lets the config compose shared fragments without duplicating prompt text —
+ * resolved into a single string by `resolvePrompts` before the API call.
+ */
+export type ComposableInstructions = string | string[];
+
+/** A workflow node in authoring (pre-resolution) form — `instructions` may be composable. */
+export interface RawWorkflowNode {
+  type?: string;
+  id: string;
+  name?: string;
+  message?: string;
+  instructions?: ComposableInstructions;
+  instructions_mode?: "append" | "replace";
+  shared_tool_ids?: string[];
+  tools_mode?: string;
+  shared_tool_id?: string;
+}
+
+/** The conversation flow in authoring (pre-resolution) form. */
+export interface RawConversationFlow {
+  start_node_id: string;
+  nodes: RawWorkflowNode[];
+  edges: FlowEdge[];
+}
+
+/**
+ * Assistant config in authoring (pre-resolution) form.
+ *
+ * `instructions` fields (`top-level` and per `node`) may be a `string | string[]`:
+ * an array of `@prompt:<name>` references and/or plain strings that are composed
+ * (joined with `\n\n`) and resolved to a single string by `resolvePrompts`,
+ * producing a `CreateAssistantRequest` for the Telnyx API.
+ *
+ * `CreateAssistantRequest` (the post-resolution SDK type with `string` instructions)
+ * is assignable to `RawAssistantConfig`, so existing `validConfig()` fixtures
+ * keep working without modification.
+ */
+export interface RawAssistantConfig {
+  name: string;
+  instructions: ComposableInstructions;
+  model?: string;
+  dynamic_variables_webhook_url?: string;
+  dynamic_variables_webhook_timeout_ms?: number;
+  enabled_features?: string[];
+  mcp_servers?: AssistantMcpServer[];
+  dynamic_variables?: Record<string, unknown>;
+  conversation_flow?: RawConversationFlow;
+  tool_ids?: string[];
+}

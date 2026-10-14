@@ -107,7 +107,67 @@ npm run lint
 
 # Local development
 npm run dev  # starts telnyx-edge dev from project root
+
+# Run eval unit tests (client, runner, coverage guardrail, scenario shape)
+npx tsx workflow/eval/eval.test.ts
 ```
+
+## Running the Clinic Evals
+
+The workflow eval harness tests the deployed AI Assistant's conversation routing, appointment lifecycle, and edge-case handling using the Telnyx Assistant Tests API.
+
+### Prerequisites
+
+- `TELNYX_API_KEY` set in `.env` (used by the eval client)
+- `ASSISTANT_DESTINATION` set in `.env` or `.telnyx/assistant.json` cached from a prior deploy
+- The assistant must be deployed (`npm run deploy:assistant`)
+
+### Test Suites
+
+| Suite | Scenarios | What it covers | Runtime |
+|---|---|---|---|
+| `clinic-routing` | 16 | One scenario per high-value LLM-conditioned routing edge (intent→4, appt_menu→4, verify_create→3, verify_cancel→3, anything_else→2). Each uses a dual-criterion rubric: reached expected target + did not diverge to nearest sibling. | ~4 min |
+| `clinic-appointment-lifecycle` | 1 | End-to-end create→verify→list→cancel→list in a single conversation. Asserts booking appears after creation, disappears after cancellation, and verification gate fires before both destructive actions. | ~4 min |
+| `clinic-edge-cases` | 6 | Out-of-hours slot rejection, FAQ out-of-scope escalation, conflict + accept alternative, mid-collection abandon, explicit human request, anything-else loop twice. | ~4 min |
+| `workflow-routing` | 1 | Boilerplate scenario from the original eval harness (`Routing: Handle Request`). | ~15s |
+| **All** | **24** | All of the above. | **~12 min** |
+
+### CLI Usage
+
+```bash
+# Run all scenarios (boilerplate + all clinic)
+npm run eval
+
+# Run a single suite
+npm run eval -- --suite clinic-routing
+npm run eval -- --suite clinic-appointment-lifecycle
+npm run eval -- --suite clinic-edge-cases
+
+# Run a single scenario by exact name
+npm run eval -- --scenario "Routing: Intent→FAQ"
+
+# Run the boilerplate scenario only
+npm run eval -- --suite workflow-routing
+```
+
+The CLI prints a summary matrix at the end showing each scenario name, each rubric criterion, and its pass/fail status, followed by a total pass count. Exits non-zero if any criterion failed.
+
+### Coverage Guardrail
+
+Before running live evals, the unit tests include a coverage guardrail that verifies every high-value LLM-conditioned edge in `assistant/conversation-flow.json` is referenced by at least one scenario's `target_edge_ids`. This catches workflow drift — if a developer adds a new routing edge without a corresponding eval scenario, the guardrail test fails:
+
+```bash
+# Run the coverage guardrail + all eval unit tests
+npx tsx workflow/eval/eval.test.ts
+```
+
+The guardrail only requires coverage for the 5 high-value branching nodes (`n_intent`, `n_appt_menu`, `n_verify_create`, `n_verify_cancel`, `n_anything_else`). Deterministic `default`-condition edges and single-path confirmation transitions do not need explicit coverage.
+
+### Interpreting Results
+
+- All criteria passed: the assistant routes correctly for the tested paths.
+- A criterion failed: check the Telnyx Portal for the conversation transcript to see where the routing diverged.
+- Coverage guardrail fails: add a scenario with `target_edge_ids` covering the named edge.
 
 ## Observability
 

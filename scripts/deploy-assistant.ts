@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { loadConfig, validateConfig, withWebhookUrl, withMcpServer, withSharedToolIds } from "../workflow/builder";
+import { loadConfig, validateConfig, resolvePrompts, writeFlowSnapshot, withWebhookUrl, withMcpServer, withSharedToolIds } from "../workflow/builder";
 import { TelnyxAssistantClient } from "../workflow/client";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(here, "..");
 const CONFIG_PATH = join(ROOT_DIR, "workflow", "assistant.config.json");
+const SNAPSHOT_PATH = join(ROOT_DIR, "assistant", "conversation-flow.json");
 
 function parseArgs(argv: string[]): { webhookUrl: string | null } {
   let webhookUrl: string | null = null;
@@ -47,6 +48,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log("\u2713 Config validated");
+
+  const resolvedConfig = resolvePrompts(config);
+  writeFlowSnapshot(resolvedConfig, SNAPSHOT_PATH);
+  console.log(`\u2713 Prompts resolved + snapshot synced: ${SNAPSHOT_PATH}`);
 
   let edgeBaseUrl: string;
   if (flagUrl) {
@@ -162,7 +167,7 @@ async function main(): Promise<void> {
   );
   console.log(`\u2713 capture_appointment_details tool: ${captureToolId}`);
 
-  let configWithWebhook = withWebhookUrl(config, webhookUrl);
+  let configWithWebhook = withWebhookUrl(resolvedConfig, webhookUrl);
   configWithWebhook = withMcpServer(configWithWebhook, mcpServerId);
   configWithWebhook = withSharedToolIds(configWithWebhook, [
     captureToolId,
@@ -193,9 +198,24 @@ async function main(): Promise<void> {
   if (process.env.ASSISTANT_ID) {
     assistantId = process.env.ASSISTANT_ID;
     console.log(`\u2192 Updating existing assistant: ${assistantId}\u2026`);
-    const updated = await client.update(assistantId, configWithWebhook);
-    assistantId = updated.id;
-    console.log(`\u2713 Assistant updated: ${assistantId}`);
+    try {
+      const updated = await client.update(assistantId, configWithWebhook);
+      assistantId = updated.id;
+      console.log(`\u2713 Assistant updated: ${assistantId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
+        console.log(`\u26A0 Assistant ${assistantId} no longer exists \u2014 creating a new one\u2026`);
+        const created = await client.create(configWithWebhook);
+        assistantId = created.id;
+        console.log(`\u2713 Assistant created: ${assistantId}`);
+        console.log(
+          `  Update ASSISTANT_ID=${assistantId} in .env for idempotent redeploys.`,
+        );
+      } else {
+        throw err;
+      }
+    }
   } else {
     console.log("\u2192 Creating new assistant\u2026");
     const created = await client.create(configWithWebhook);

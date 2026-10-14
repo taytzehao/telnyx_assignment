@@ -5,7 +5,8 @@
   "scripts": {
     "deploy": "tsx --env-file-if-exists=.env scripts/deploy.ts",
     "deploy:assistant": "tsx --env-file-if-exists=.env scripts/deploy-assistant.ts",
-    "dev": "tsx --env-file-if-exists=.env scripts/dev.ts"
+    "dev": "tsx --env-file-if-exists=.env scripts/dev.ts",
+    "eval": "tsx --env-file-if-exists=.env workflow/eval/run-eval.ts"
   },
   "dependencies": {
     "telnyx": "^7.25.0"

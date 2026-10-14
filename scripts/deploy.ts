@@ -8,7 +8,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig, validateConfig, withWebhookUrl } from "../workflow/builder";
+import { loadConfig, validateConfig, resolvePrompts, writeFlowSnapshot, withWebhookUrl } from "../workflow/builder";
 import { TelnyxAssistantClient } from "../workflow/client";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +16,7 @@ const ROOT_DIR = resolve(here, "..");
 const EDGE_DIR = join(ROOT_DIR, "edge");
 const TOML_PATH = join(EDGE_DIR, "telnyx.toml");
 const CONFIG_PATH = join(ROOT_DIR, "workflow", "assistant.config.json");
+const SNAPSHOT_PATH = join(ROOT_DIR, "assistant", "conversation-flow.json");
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -185,8 +186,12 @@ async function deployAssistant(edgeUrl: string): Promise<void> {
   }
   console.log("\u2713 Config validated");
 
+  const resolvedConfig = resolvePrompts(config);
+  writeFlowSnapshot(resolvedConfig, SNAPSHOT_PATH);
+  console.log("\u2713 Prompts resolved + snapshot synced");
+
   const webhookUrl = edgeUrl.replace(/\/$/, "") + "/webhook";
-  const configWithWebhook = withWebhookUrl(config, webhookUrl);
+  const configWithWebhook = withWebhookUrl(resolvedConfig, webhookUrl);
   console.log(`\u2713 Webhook URL: ${webhookUrl}`);
 
   const client = new TelnyxAssistantClient();

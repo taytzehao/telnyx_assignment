@@ -1,6 +1,12 @@
 {
   "name": "ACME Clinic Assistant",
-  "instructions": "You are the ACME Clinic automated assistant. You help callers with FAQs about hours, location, services, and fees, and manage appointments (create, list, cancel) for the current caller. Appointments are 30-minute slots between 9 AM and 5 PM. If you cannot help with a request, inform the caller to call the human line. Be courteous and concise.",
+  "instructions": [
+    "@prompt:clinic_role",
+    "@prompt:appt_slot_context",
+    "@prompt:human_line",
+    "@prompt:caller_context",
+    "@prompt:controller_contract"
+  ],
   "model": "zai-org/GLM-5.2",
   "dynamic_variables_webhook_url": "",
   "dynamic_variables_webhook_timeout_ms": 5000,
@@ -19,7 +25,8 @@
     "appointment_start_time": "",
     "cancel_date": "",
     "cancel_start_time": "",
-    "cancel_appointment_id": ""
+    "cancel_appointment_id": "",
+    "caller_appointments": "[]"
   },
   "conversation_flow": {
     "start_node_id": "n_greeting",
@@ -33,26 +40,30 @@
       {
         "id": "n_intent",
         "name": "Identify Intent",
-        "instructions": "You are the ACME Clinic assistant. Ask the caller what they need help with today. There are three things you can help with: answering FAQs about our clinic (hours, location, services, fees), managing appointments (book, view, or cancel), or connecting you with a human. If the caller says they do not need help, thank them and end the call. Determine the caller's intent and route accordingly.",
-        "instructions_mode": "append"
+        "instructions": ["@prompt:n_intent"],
+        "instructions_mode": "append",
+        "shared_tool_ids": [],
+        "tools_mode": "replace"
       },
       {
         "id": "n_faq",
         "name": "Answer FAQ",
-        "instructions": "You are answering FAQ questions for ACME Clinic. Use the get_faq tool to retrieve information about hours, location, services, or fees. Provide the information clearly and concisely to the caller. If the caller asks about something outside hours, location, services, or fees, direct them to call our human line. After answering, check if the caller needs anything else.",
+        "instructions": ["@prompt:n_faq"],
         "instructions_mode": "append",
         "tools_mode": "append"
       },
       {
         "id": "n_appt_menu",
         "name": "Appointment Menu",
-        "instructions": "Ask the caller which appointment action they need: create a new appointment, list their existing appointments, or cancel an appointment. Wait for their response and route accordingly. If the caller changed their mind, return to the main menu.",
-        "instructions_mode": "append"
+        "instructions": ["@prompt:n_appt_menu"],
+        "instructions_mode": "append",
+        "shared_tool_ids": [],
+        "tools_mode": "replace"
       },
       {
         "id": "n_collect_appt",
         "name": "Collect Appt Details",
-        "instructions": "Collect the date and time for a new appointment from the caller. Appointments are 30-minute slots available between 9 AM and 5 PM. Ask for both the date (e.g., January 15th) and the preferred time (e.g., 10 AM). If the caller provides incomplete information, ask for what is missing. Once you have both a date and a time, call the capture_appointment_details tool to store the date as appointment_date (in YYYY-MM-DD format) and the time as appointment_start_time (in HH:MM 24-hour format), then proceed to verify the details with the caller.",
+        "instructions": ["@prompt:n_collect_appt"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_CAPTURE_TOOL_ID"
@@ -62,13 +73,15 @@
       {
         "id": "n_verify_create",
         "name": "Verify Create",
-        "instructions": "Read back the proposed appointment details to the caller: the date and start time. Ask: Shall I go ahead and book this appointment? Only proceed when the caller gives an unqualified confirmation (a clear yes). If the caller wants to change anything about the date or time, route back to collect the new details. If the caller no longer wants to book an appointment, return to the main menu.",
-        "instructions_mode": "append"
+        "instructions": ["@prompt:verify_contract", "@prompt:n_verify_create"],
+        "instructions_mode": "append",
+        "shared_tool_ids": [],
+        "tools_mode": "replace"
       },
       {
         "id": "n_create_appt",
         "name": "Create Appointment",
-        "instructions": "Use the create_appointment tool to create the appointment with the caller's confirmed date and start_time. The caller's phone number is available as {{caller_number}}. The date is in {{appointment_date}} and the start time is in {{appointment_start_time}}. Pass these as the date and start_time parameters to the tool. If the tool returns success, confirm the booking details to the caller. If the tool returns a conflict, tell the caller about the conflict and present the suggested alternative times from the tool response.",
+        "instructions": ["@prompt:n_create_appt"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_CREATE_TOOL_ID"
@@ -78,13 +91,13 @@
       {
         "id": "n_confirm_book",
         "name": "Confirm Booking",
-        "instructions": "The appointment has been successfully created. Read the confirmed appointment details (date, start time, and end time) to the caller. Then ask if there is anything else you can help with.",
+        "instructions": ["@prompt:n_confirm_book"],
         "instructions_mode": "append"
       },
       {
         "id": "n_suggest_alt",
         "name": "Suggest Alternatives",
-        "instructions": "The requested appointment slot conflicts with an existing booking. Present the suggested alternative free slots to the caller from the tool response. If the caller picks one of the suggested slots, call the capture_appointment_details tool to update appointment_date and appointment_start_time with the new values, then proceed to verify the new details before booking. If the caller wants a completely different time, route back to collect new details. If the caller wants to do something else, return to the main menu.",
+        "instructions": ["@prompt:n_suggest_alt"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_CAPTURE_TOOL_ID"
@@ -94,7 +107,7 @@
       {
         "id": "n_list_appt",
         "name": "List Appointments",
-        "instructions": "Use the list_appointments tool to retrieve all appointments for the current caller. The caller's phone number is available as {{caller_number}} — pass it as the caller_number parameter. Present the results to the caller.",
+        "instructions": ["@prompt:n_list_appt"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_LIST_TOOL_ID"
@@ -104,13 +117,13 @@
       {
         "id": "n_show_appt",
         "name": "Show Appointments",
-        "instructions": "Read out the caller appointments from the list results. If there are appointments, list each one with its date and time. If there are no appointments, inform the caller. Then ask if there is anything else you can help with.",
+        "instructions": ["@prompt:n_show_appt"],
         "instructions_mode": "append"
       },
       {
         "id": "n_collect_cancel",
         "name": "Collect Cancel Details",
-        "instructions": "Ask the caller which appointment they want to cancel. They can specify it by the date and time of the appointment, or by the appointment ID if they have one from a previous listing. Once the caller specifies what to cancel, call the capture_appointment_details tool to store the cancellation details as cancel_date (YYYY-MM-DD), cancel_start_time (HH:MM), or cancel_appointment_id as appropriate, then proceed to verify the cancellation.",
+        "instructions": ["@prompt:n_collect_cancel"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_CAPTURE_TOOL_ID"
@@ -120,13 +133,15 @@
       {
         "id": "n_verify_cancel",
         "name": "Verify Cancel",
-        "instructions": "Read back the appointment the caller wants to cancel. Ask: Are you sure you want to cancel this appointment? Only proceed when the caller gives an unqualified confirmation (a clear yes). If the caller wants to cancel a different appointment, route back to collect the new cancellation details. If the caller no longer wants to cancel, return to the main menu.",
-        "instructions_mode": "append"
+        "instructions": ["@prompt:verify_contract", "@prompt:n_verify_cancel"],
+        "instructions_mode": "append",
+        "shared_tool_ids": [],
+        "tools_mode": "replace"
       },
       {
         "id": "n_cancel_appt",
         "name": "Cancel Appointments",
-        "instructions": "Use the cancel_appointments tool to cancel the appointment the caller confirmed. The caller's phone number is available as {{caller_number}}. If the caller specified a time, pass cancel_by as 'time' with cancel_date ({{cancel_date}}) and cancel_start_time ({{cancel_start_time}}). If the caller specified an ID, pass cancel_by as 'id' with appointment_id ({{cancel_appointment_id}}). If the cancellation succeeded, confirm to the caller. If no matching appointment was found, inform the caller and ask them to clarify which appointment they want to cancel.",
+        "instructions": ["@prompt:n_cancel_appt"],
         "instructions_mode": "append",
         "shared_tool_ids": [
           "PLACEHOLDER_CANCEL_TOOL_ID"
@@ -136,20 +151,22 @@
       {
         "id": "n_confirm_cancel",
         "name": "Confirm Cancellation",
-        "instructions": "The appointment has been successfully cancelled. Confirm the cancellation details to the caller. Then ask if there is anything else you can help with.",
+        "instructions": ["@prompt:n_confirm_cancel"],
         "instructions_mode": "append"
       },
       {
         "id": "n_escalate",
         "name": "Escalate",
-        "instructions": "Inform the caller that their request cannot be handled by this automated system. Tell them: I am sorry, I am unable to help with that request. Please call our human assistance line at 1-800-ACME-HELP during business hours for further assistance. Once the caller acknowledges, proceed to end the call.",
+        "instructions": ["@prompt:n_escalate"],
         "instructions_mode": "append"
       },
       {
         "id": "n_anything_else",
         "name": "Anything Else?",
-        "instructions": "Ask the caller: Is there anything else I can help you with? If the caller says yes, return to the main intent detection. If the caller says no or indicates they are done, proceed to the goodbye message.",
-        "instructions_mode": "append"
+        "instructions": ["@prompt:n_anything_else"],
+        "instructions_mode": "append",
+        "shared_tool_ids": [],
+        "tools_mode": "replace"
       },
       {
         "type": "speak",

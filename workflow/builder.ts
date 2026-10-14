@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import type { CreateAssistantRequest } from "./types";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import type { CreateAssistantRequest, RawAssistantConfig } from "./types";
+import { resolveInstructions } from "./prompts";
 
 export interface ValidationResult {
   ok: boolean;
@@ -14,9 +16,70 @@ function isToolNode(node: { type?: string }): boolean {
   return node.type === "tool";
 }
 
-export function loadConfig(path: string): CreateAssistantRequest {
+export function loadConfig(path: string): RawAssistantConfig {
   const raw = readFileSync(path, "utf-8");
-  return JSON.parse(raw) as CreateAssistantRequest;
+  return JSON.parse(raw) as RawAssistantConfig;
+}
+
+/**
+ * Resolve every composable `instructions` field (top-level and per-node) into
+ * the final string the Telnyx API expects.
+ *
+ * The assistant config stores prompt *references* — a single `@prompt:<name>`
+ * string or an **array** of such markers / plain strings — instead of
+ * duplicated prompt text. `instructions` fields are resolved via
+ * {@link resolveInstructions} (which composes arrays into a single string),
+ * producing a `CreateAssistantRequest` with plain-string instructions.
+ *
+ * Array composition is the key mechanism: the root `instructions` can list
+ * shared fragments (`["@prompt:clinic_role", "@prompt:controller_contract", …]`)
+ * that apply to every node via `instructions_mode: "append"`, and each node
+ * can list its own job plus any extra fragments it needs — all without
+ * duplicating prompt text across the config.
+ *
+ * Plain-string instructions pass through untouched, so the unit-test
+ * fixtures (which use literal strings) keep working without markers.
+ *
+ * @throws if any `@prompt:` marker references an unknown name — the
+ *   workflow-drift guardrail that catches a new node without a prompt entry.
+ */
+export function resolvePrompts(
+  config: RawAssistantConfig,
+): CreateAssistantRequest {
+  const next: RawAssistantConfig = { ...config };
+
+  next.instructions = resolveInstructions(config.instructions);
+
+  if (next.conversation_flow) {
+    next.conversation_flow = {
+      ...next.conversation_flow,
+      nodes: next.conversation_flow.nodes.map((node) => {
+        if (node.instructions === undefined) return node;
+        return { ...node, instructions: resolveInstructions(node.instructions) };
+      }),
+    };
+  }
+
+  return next as unknown as CreateAssistantRequest;
+}
+
+/**
+ * Write the resolved `conversation_flow` to the snapshot file the eval
+ * coverage guardrail reads (`assistant/conversation-flow.json`). Keeping
+ * the snapshot in sync with the deployed config means the guardrail audits
+ * the same prompts the live assistant uses — never a stale snapshot.
+ */
+export function writeFlowSnapshot(
+  config: CreateAssistantRequest,
+  snapshotPath: string,
+): void {
+  const fullPath = resolve(snapshotPath);
+  const dir = dirname(fullPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const payload = { conversation_flow: config.conversation_flow };
+  writeFileSync(fullPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
 }
 
 export function withWebhookUrl(
@@ -40,13 +103,16 @@ export function withSharedToolIds(
   return { ...config, tool_ids: toolIds };
 }
 
-export function validateConfig(config: CreateAssistantRequest): ValidationResult {
+export function validateConfig(config: RawAssistantConfig): ValidationResult {
   const errors: string[] = [];
 
   if (!config.name) {
     errors.push("Missing required field: name");
   }
-  if (!config.instructions) {
+  if (
+    !config.instructions ||
+    (Array.isArray(config.instructions) && config.instructions.length === 0)
+  ) {
     errors.push("Missing required field: instructions");
   }
 

@@ -18,6 +18,7 @@ interface DynamicVariables {
   last_intent: string;
   greeting: string;
   escalation_enabled: boolean;
+  caller_appointments: string;
 }
 
 /**
@@ -52,6 +53,15 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
     );
     const isReturningCaller = callCount > 1;
 
+    let callerAppointments = "[]";
+    try {
+      const apptStub = env.APPOINTMENT_SESSIONS.idFromName(callerNumber);
+      const appointments = await apptStub.listAppointments();
+      callerAppointments = JSON.stringify(appointments);
+    } catch {
+      // fall back to empty list if actor call fails
+    }
+
     const dynamicVars: DynamicVariables = {
       caller_number: callerNumber,
       call_session_id: callSessionId,
@@ -63,6 +73,7 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
         ? `Welcome back! This is your call #${callCount}.`
         : "Hello! Thanks for calling.",
       escalation_enabled: escalationEnabled,
+      caller_appointments: callerAppointments,
     };
 
     const latencyMs = Date.now() - start;
