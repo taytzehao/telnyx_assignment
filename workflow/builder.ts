@@ -1,5 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import type { CreateAssistantRequest, RawAssistantConfig } from "./types";
 import { resolveInstructions } from "./prompts";
 
@@ -63,37 +62,11 @@ export function resolvePrompts(
   return next as unknown as CreateAssistantRequest;
 }
 
-/**
- * Write the resolved `conversation_flow` to the snapshot file the eval
- * coverage guardrail reads (`assistant/conversation-flow.json`). Keeping
- * the snapshot in sync with the deployed config means the guardrail audits
- * the same prompts the live assistant uses — never a stale snapshot.
- */
-export function writeFlowSnapshot(
-  config: CreateAssistantRequest,
-  snapshotPath: string,
-): void {
-  const fullPath = resolve(snapshotPath);
-  const dir = dirname(fullPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  const payload = { conversation_flow: config.conversation_flow };
-  writeFileSync(fullPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-}
-
 export function withWebhookUrl(
   config: CreateAssistantRequest,
   url: string,
 ): CreateAssistantRequest {
   return { ...config, dynamic_variables_webhook_url: url };
-}
-
-export function withMcpServer(
-  config: CreateAssistantRequest,
-  serverId: string,
-): CreateAssistantRequest {
-  return { ...config, mcp_servers: [{ id: serverId }] };
 }
 
 export function withSharedToolIds(

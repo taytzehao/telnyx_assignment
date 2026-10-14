@@ -75,7 +75,7 @@ describe("handleWebhook", () => {
   it("returns 200 with dynamic variables for a new caller", async () => {
     const req = webhookRequest({
       call_session_id: "sess-001",
-      caller_number: "+1234567890",
+      data: { payload: { telnyx_end_user_target: "+1234567890" } },
       current_node: "greeting",
     });
 
@@ -85,7 +85,6 @@ describe("handleWebhook", () => {
 
     expect(data).toEqual({
       dynamic_variables: {
-        caller_number: "+1234567890",
         call_session_id: "sess-001",
         current_node: "greeting",
         call_count: 1,
@@ -101,14 +100,14 @@ describe("handleWebhook", () => {
   it("marks returning callers correctly on second call", async () => {
     const req1 = webhookRequest({
       call_session_id: "sess-a",
-      caller_number: "+1111111111",
+      data: { payload: { telnyx_end_user_target: "+1111111111" } },
       current_node: "greeting",
     });
     await handleWebhook(req1, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     const req2 = webhookRequest({
       call_session_id: "sess-b",
-      caller_number: "+1111111111",
+      data: { payload: { telnyx_end_user_target: "+1111111111" } },
       current_node: "faq",
     });
     const res2 = await handleWebhook(req2, env as unknown as Parameters<typeof handleWebhook>[1]);
@@ -130,7 +129,7 @@ describe("handleWebhook", () => {
     });
 
     const req = webhookRequest({
-      caller_number: "+9999999999",
+      data: { payload: { telnyx_end_user_target: "+9999999999" } },
       current_node: "greeting",
     });
     const res = await handleWebhook(req, brokenEnv as unknown as Parameters<typeof handleWebhook>[1]);
@@ -149,7 +148,7 @@ describe("handleWebhook", () => {
 
   it("emits structured log with caller, node, outcome, and latencyMs", async () => {
     const req = webhookRequest({
-      caller_number: "+2222222222",
+      data: { payload: { telnyx_end_user_target: "+2222222222" } },
       call_session_id: "sess-log",
       current_node: "identify_intent",
     });
@@ -171,7 +170,7 @@ describe("handleWebhook", () => {
     env.SESSIONS.put("flag/escalation_enabled", "true");
 
     const req = webhookRequest({
-      caller_number: "+3333333333",
+      data: { payload: { telnyx_end_user_target: "+3333333333" } },
       current_node: "greeting",
     });
     const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
@@ -192,13 +191,14 @@ describe("handleWebhook", () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data.dynamic_variables.caller_number).toBe("unknown");
+    expect(data.dynamic_variables).not.toHaveProperty("caller_number");
+    expect(env.CALL_SESSIONS.idFromName).toHaveBeenCalledWith("unknown");
     expect(data.dynamic_variables.call_count).toBe(1);
   });
 
-  it("calls the CallSession actor with the caller's number as the actor name", async () => {
+  it("calls the CallSession actor with telnyx_end_user_target as the actor name", async () => {
     const req = webhookRequest({
-      caller_number: "+5555555555",
+      data: { payload: { telnyx_end_user_target: "+5555555555" } },
       current_node: "greeting",
     });
     await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
@@ -208,7 +208,7 @@ describe("handleWebhook", () => {
 
   it("returns caller_appointments as [] when the caller has no appointments", async () => {
     const req = webhookRequest({
-      caller_number: "+7777777777",
+      data: { payload: { telnyx_end_user_target: "+7777777777" } },
       current_node: "n_appt_menu",
     });
     const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
@@ -225,7 +225,7 @@ describe("handleWebhook", () => {
     env.APPOINTMENT_SESSIONS._apptStore.set("+8888888888", appointments);
 
     const req = webhookRequest({
-      caller_number: "+8888888888",
+      data: { payload: { telnyx_end_user_target: "+8888888888" } },
       current_node: "n_appt_menu",
     });
     const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
@@ -234,14 +234,28 @@ describe("handleWebhook", () => {
     expect(JSON.parse(data.dynamic_variables.caller_appointments)).toEqual(appointments);
   });
 
-  it("calls the AppointmentSession actor with the caller's number", async () => {
+  it("calls the AppointmentSession actor with telnyx_end_user_target", async () => {
     const req = webhookRequest({
-      caller_number: "+6666666666",
+      data: { payload: { telnyx_end_user_target: "+6666666666" } },
       current_node: "n_appt_menu",
     });
     await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
 
     expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+6666666666");
+  });
+
+  it("ignores a top-level caller_number and uses telnyx_end_user_target", async () => {
+    const req = webhookRequest({
+      caller_number: "+1000000000",
+      current_node: "greeting",
+      data: { payload: { telnyx_end_user_target: "+4444444444" } },
+    });
+    const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);
+    const data = await res.json();
+
+    expect(env.CALL_SESSIONS.idFromName).toHaveBeenCalledWith("+4444444444");
+    expect(env.APPOINTMENT_SESSIONS.idFromName).toHaveBeenCalledWith("+4444444444");
+    expect(data.dynamic_variables).not.toHaveProperty("caller_number");
   });
 
   it("falls back to [] when the AppointmentSession actor throws", async () => {
@@ -252,7 +266,7 @@ describe("handleWebhook", () => {
     });
 
     const req = webhookRequest({
-      caller_number: "+9999999999",
+      data: { payload: { telnyx_end_user_target: "+9999999999" } },
       current_node: "n_appt_menu",
     });
     const res = await handleWebhook(req, env as unknown as Parameters<typeof handleWebhook>[1]);

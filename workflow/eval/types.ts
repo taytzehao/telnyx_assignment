@@ -61,6 +61,14 @@ export interface RubricItem {
   criteria: string;
 }
 
+/** An appointment that must exist for the test caller before a run starts. */
+export interface SeedAppointment {
+  /** YYYY-MM-DD — must be a future date. */
+  date: string;
+  /** HH:MM, 24-hour, on a 30-minute slot between 09:00 and 16:30. */
+  start_time: string;
+}
+
 export interface TestScenario {
   name: string;
   instructions: string;
@@ -70,6 +78,12 @@ export interface TestScenario {
   test_suite: string;
   max_duration_seconds?: number;
   target_edge_ids?: string[];
+  /**
+   * Appointments the scenario's caller already has. Each test runs as its own
+   * caller (`ai-assistant-test-<test_id>`), so the runner clears that caller's
+   * appointments and creates these before every run.
+   */
+  seed_appointments?: SeedAppointment[];
 }
 
 export type TestCache = Record<string, string>;

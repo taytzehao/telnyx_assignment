@@ -1,6 +1,6 @@
-import type { Env } from "../../env";
-import { log, generateRequestId } from "../../lib/logger";
-import type { CancelResult } from "../../actors/appointment-actor";
+import type { Env } from "../env";
+import { log, generateRequestId } from "../lib/logger";
+import type { CancelResult } from "../actors/appointment-actor";
 
 export interface CancelAppointmentsArgs {
   caller_number: string;

@@ -1,6 +1,6 @@
-import type { Env } from "../../env";
-import { getFaq } from "../../lib/faq";
-import { log, generateRequestId } from "../../lib/logger";
+import type { Env } from "../env";
+import { getFaq } from "../lib/faq";
+import { log, generateRequestId } from "../lib/logger";
 
 export interface GetFaqArgs {
   caller_number: string;

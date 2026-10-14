@@ -3,6 +3,8 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { EvalClient } from "./client";
 import { EvalRunner } from "./runner";
+import { EdgeCallerState, testCallerId } from "./caller-state";
+import { composeScenarioInstructions, defineScenario, SCENARIO_FRAGMENTS, SEEDS } from "./scenario-prompts";
 import { handleRequestScenario } from "./scenarios";
 import { allClinicScenarios, HIGH_VALUE_BRANCHING_NODES } from "./clinic-scenarios";
 
@@ -40,6 +42,7 @@ async function runAll(): Promise<void> {
     const c = new EvalClient("test-key");
     assert.ok(c);
     assert.strictEqual(typeof c.createTest, "function");
+    assert.strictEqual(typeof c.updateTest, "function");
     assert.strictEqual(typeof c.triggerRun, "function");
     assert.strictEqual(typeof c.getRun, "function");
   });
@@ -133,12 +136,17 @@ async function runAll(): Promise<void> {
     unlinkSync(cachePath);
   });
 
-  await testAsync("cache hit skips creation and triggers directly", async () => {
+  await testAsync("cache hit syncs the test definition, skips creation, and triggers", async () => {
     const cachePath = ".telnyx/eval-test-hit.json";
     writeFileSync(cachePath, JSON.stringify({ "Routing: Handle Request": "test-cached-id" }));
 
     let createCallCount = 0;
+    const updated: { testId: string; instructions: string }[] = [];
     const mockClient = {
+      updateTest: async (testId: string, scenario: { instructions: string }) => {
+        updated.push({ testId, instructions: scenario.instructions });
+        return { test_id: testId, name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const };
+      },
       createTest: async () => {
         createCallCount++;
         return { test_id: "should-not-be-called", name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const };
@@ -157,7 +165,45 @@ async function runAll(): Promise<void> {
     });
     const { testRun } = await runner.run({ ...handleRequestScenario, destination: "+10000000000" });
     assert.strictEqual(createCallCount, 0, "createTest should not be called when cache hit");
+    assert.deepStrictEqual(updated, [{ testId: "test-cached-id", instructions: handleRequestScenario.instructions }],
+      "the cached test must be updated with the current scenario before triggering");
     assert.strictEqual(testRun.status, "passed");
+    unlinkSync(cachePath);
+  });
+
+  await testAsync("a 404 while syncing a cached test recreates it", async () => {
+    const cachePath = ".telnyx/eval-test-sync-404.json";
+    writeFileSync(cachePath, JSON.stringify({ "Routing: Handle Request": "test-deleted-id" }));
+
+    let createCallCount = 0;
+    const triggered: string[] = [];
+    const mockClient = {
+      updateTest: async () => {
+        throw new Error("404 Not Found: test does not exist");
+      },
+      createTest: async () => {
+        createCallCount++;
+        return { test_id: "test-fresh-id", name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const };
+      },
+      triggerRun: async (testId: string) => {
+        triggered.push(testId);
+        return { run_id: "run-4", test_id: testId, status: "passed" as const, triggered_by: "manual", created_at: "" };
+      },
+      getRun: async (_testId: string, _runId: string) => {
+        return { run_id: "run-4", test_id: "test-fresh-id", status: "passed" as const, triggered_by: "manual", created_at: "" };
+      },
+    };
+    const runner = new EvalRunner(mockClient as unknown as EvalClient, {
+      cachePath,
+      pollIntervalMs: 10,
+      timeoutMs: 5000,
+    });
+    await runner.run({ ...handleRequestScenario, destination: "+10000000000" });
+
+    assert.strictEqual(createCallCount, 1, "createTest should be called once");
+    assert.deepStrictEqual(triggered, ["test-fresh-id"], "only the recreated test is triggered");
+    const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
+    assert.strictEqual(cache["Routing: Handle Request"], "test-fresh-id");
     unlinkSync(cachePath);
   });
 
@@ -168,6 +214,7 @@ async function runAll(): Promise<void> {
     let triggerCallCount = 0;
     let createCallCount = 0;
     const mockClient = {
+      updateTest: async (testId: string) => ({ test_id: testId, name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const }),
       createTest: async () => {
         createCallCount++;
         return { test_id: "test-recreated-id", name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const };
@@ -197,6 +244,145 @@ async function runAll(): Promise<void> {
     const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
     assert.strictEqual(cache["Routing: Handle Request"], "test-recreated-id");
     unlinkSync(cachePath);
+  });
+
+  console.log("\nCaller state tests:");
+
+  const seeded = {
+    ...handleRequestScenario,
+    destination: "+10000000000",
+    seed_appointments: [{ date: "2027-01-15", start_time: "10:00" }],
+  };
+
+  await testAsync("runner prepares the test caller with the scenario's seeds before triggering", async () => {
+    const cachePath = ".telnyx/eval-test-seed.json";
+    writeFileSync(cachePath, JSON.stringify({ "Routing: Handle Request": "test-seed-id" }));
+    const events: string[] = [];
+    const mockClient = {
+      updateTest: async (testId: string) => ({ test_id: testId, name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const }),
+      createTest: async () => { throw new Error("should not be called"); },
+      triggerRun: async (testId: string) => {
+        events.push(`trigger ${testId}`);
+        return { run_id: "run-5", test_id: testId, status: "passed" as const, triggered_by: "manual", created_at: "" };
+      },
+      getRun: async () => ({ run_id: "run-5", test_id: "test-seed-id", status: "passed" as const, triggered_by: "manual", created_at: "" }),
+    };
+    const callerState = {
+      prepare: async (callerId: string, seeds: { date: string; start_time: string }[]) => {
+        events.push(`prepare ${callerId} ${JSON.stringify(seeds)}`);
+      },
+    };
+    const runner = new EvalRunner(mockClient as unknown as EvalClient, { cachePath, pollIntervalMs: 10, timeoutMs: 5000, callerState });
+    await runner.run(seeded);
+    assert.deepStrictEqual(events, [
+      `prepare ai-assistant-test-test-seed-id ${JSON.stringify(seeded.seed_appointments)}`,
+      "trigger test-seed-id",
+    ]);
+    unlinkSync(cachePath);
+  });
+
+  await testAsync("runner re-prepares the recreated test's caller after a trigger 404", async () => {
+    const cachePath = ".telnyx/eval-test-seed-404.json";
+    writeFileSync(cachePath, JSON.stringify({ "Routing: Handle Request": "test-stale-id" }));
+    const prepared: string[] = [];
+    let triggers = 0;
+    const mockClient = {
+      updateTest: async (testId: string) => ({ test_id: testId, name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const }),
+      createTest: async () => ({ test_id: "test-new-id", name: "test", rubric: [], created_at: "", telnyx_conversation_channel: "web_chat" as const }),
+      triggerRun: async (testId: string) => {
+        if (triggers++ === 0) throw new Error("404 Not Found");
+        return { run_id: "run-6", test_id: testId, status: "passed" as const, triggered_by: "manual", created_at: "" };
+      },
+      getRun: async () => ({ run_id: "run-6", test_id: "test-new-id", status: "passed" as const, triggered_by: "manual", created_at: "" }),
+    };
+    const callerState = { prepare: async (callerId: string) => { prepared.push(callerId); } };
+    const runner = new EvalRunner(mockClient as unknown as EvalClient, { cachePath, pollIntervalMs: 10, timeoutMs: 5000, callerState });
+    await runner.run(seeded);
+    assert.deepStrictEqual(prepared, [testCallerId("test-stale-id"), testCallerId("test-new-id")]);
+    unlinkSync(cachePath);
+  });
+
+  await testAsync("runner refuses a seeded scenario without a callerState", async () => {
+    const runner = new EvalRunner({} as unknown as EvalClient, { cachePath: ".telnyx/eval-test-unused.json" });
+    await assert.rejects(() => runner.run(seeded), /needs seed_appointments/);
+  });
+
+  await testAsync("EdgeCallerState clears existing appointments, then creates the seeds", async () => {
+    const calls: { url: string; header: string | null; body: unknown }[] = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers);
+      calls.push({ url, header: headers.get("x-end-user-target"), body: JSON.parse(String(init.body)) });
+      const payload = url.endsWith("/tools/list-appointments")
+        ? { appointments: [{ id: "appt-a" }, { id: "appt-b" }] }
+        : { success: true };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    }) as unknown as typeof fetch;
+    await new EdgeCallerState("https://edge.test/", fakeFetch).prepare("ai-assistant-test-x", seeded.seed_appointments);
+    assert.deepStrictEqual(calls.map((c) => [c.url, c.body]), [
+      ["https://edge.test/tools/list-appointments", {}],
+      ["https://edge.test/tools/cancel-appointments", { cancel_by: "id", appointment_id: "appt-a" }],
+      ["https://edge.test/tools/cancel-appointments", { cancel_by: "id", appointment_id: "appt-b" }],
+      ["https://edge.test/tools/create-appointment", { date: "2027-01-15", start_time: "10:00" }],
+    ]);
+    assert.ok(calls.every((c) => c.header === "ai-assistant-test-x"), "every call carries the caller header");
+  });
+
+  await testAsync("EdgeCallerState fails loudly when the edge rejects a seed", async () => {
+    const fakeFetch = (async (url: string) =>
+      url.endsWith("/tools/list-appointments")
+        ? new Response(JSON.stringify({ appointments: [] }), { status: 200 })
+        : new Response(JSON.stringify({ success: false, conflict: true }), { status: 409 })) as unknown as typeof fetch;
+    await assert.rejects(
+      () => new EdgeCallerState("https://edge.test", fakeFetch).prepare("ai-assistant-test-x", seeded.seed_appointments),
+      /create-appointment returned HTTP 409/,
+    );
+  });
+
+  console.log("\nScenario composition tests:");
+
+  testSync("composes markers and plain text in order, joined with spaces", () => {
+    assert.strictEqual(
+      composeScenarioInstructions(["@scenario:caller_role", "Ask about hours."]),
+      `${SCENARIO_FRAGMENTS.caller_role} Ask about hours.`,
+    );
+  });
+
+  testSync("describes one seeded appointment from its spoken form", () => {
+    assert.strictEqual(
+      composeScenarioInstructions(["@scenario:seeded_appointments"], [SEEDS.jan15]),
+      `You have an appointment on ${SEEDS.jan15.spoken}.`,
+    );
+  });
+
+  testSync("describes several seeded appointments as a list", () => {
+    assert.strictEqual(
+      composeScenarioInstructions(["@scenario:seeded_appointments"], [SEEDS.jan15, SEEDS.jan20]),
+      `You have two appointments: ${SEEDS.jan15.spoken} and ${SEEDS.jan20.spoken}.`,
+    );
+  });
+
+  testSync("rejects @scenario:seeded_appointments when the scenario has no seeds", () => {
+    assert.throws(() => composeScenarioInstructions(["@scenario:seeded_appointments"]), /no seed_appointments/);
+  });
+
+  testSync("rejects an unknown @scenario: marker", () => {
+    assert.throws(() => composeScenarioInstructions(["@scenario:nope"]), /Unknown scenario marker/);
+  });
+
+  testSync("defineScenario sends only date and start_time for each seed", () => {
+    const scenario = defineScenario({
+      ...handleRequestScenario,
+      instructions: ["@scenario:caller_role", "@scenario:seeded_appointments"],
+      seed_appointments: [SEEDS.jun10],
+    });
+    assert.deepStrictEqual(scenario.seed_appointments, [{ date: SEEDS.jun10.date, start_time: SEEDS.jun10.start_time }]);
+    assert.ok(scenario.instructions.includes(SEEDS.jun10.spoken));
+  });
+
+  testSync("no clinic scenario is left with an unresolved @scenario: marker", () => {
+    for (const scenario of allClinicScenarios) {
+      assert.ok(!scenario.instructions.includes("@scenario:"), `unresolved marker in "${scenario.name}"`);
+    }
   });
 
   console.log("\nScenario tests:");
@@ -262,6 +448,15 @@ async function runAll(): Promise<void> {
       assert.ok(scenario.test_suite && scenario.test_suite.length > 0, "test_suite must be non-empty");
     });
 
+    testSync(`shape: "${scenario.name}" seed_appointments are future slots within opening hours`, () => {
+      const today = new Date().toISOString().slice(0, 10);
+      for (const seed of scenario.seed_appointments ?? []) {
+        assert.match(seed.date, /^\d{4}-\d{2}-\d{2}$/, `bad seed date ${seed.date}`);
+        assert.ok(seed.date > today, `seed date ${seed.date} must be in the future`);
+        assert.match(seed.start_time, /^(09|1[0-6]):(00|30)$/, `seed start_time ${seed.start_time} must be a 30-minute slot from 09:00 to 16:30`);
+      }
+    });
+
     testSync(`shape: "${scenario.name}" target_edge_ids valid if present`, () => {
       if (scenario.target_edge_ids !== undefined) {
         assert.ok(
@@ -274,8 +469,8 @@ async function runAll(): Promise<void> {
 
   console.log("\nCoverage guardrail tests:");
 
-  testSync("all high-value LLM edges in conversation-flow.json are covered", () => {
-    const flowPath = resolve("assistant/conversation-flow.json");
+  testSync("all high-value LLM edges in assistant.config.json are covered", () => {
+    const flowPath = resolve("workflow/assistant.config.json");
     const flowRaw = readFileSync(flowPath, "utf-8");
     const flow = JSON.parse(flowRaw) as {
       conversation_flow: {
@@ -316,7 +511,7 @@ async function runAll(): Promise<void> {
   });
 
   testSync("non-LLM edges are not required for coverage", () => {
-    const flowPath = resolve("assistant/conversation-flow.json");
+    const flowPath = resolve("workflow/assistant.config.json");
     const flowRaw = readFileSync(flowPath, "utf-8");
     const flow = JSON.parse(flowRaw) as {
       conversation_flow: {

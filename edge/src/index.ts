@@ -5,8 +5,7 @@ export { AppointmentActor } from "./actors/appointment-actor";
 
 import type { Env } from "./env";
 import { handleWebhook } from "./webhook";
-import { handleMcpRequest } from "./mcp/handler";
-import { handleToolRequest } from "./mcp/tool-handler";
+import { handleToolRequest } from "./tools/handler";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -21,10 +20,6 @@ export default {
 
     if (url.pathname === "/webhook" && req.method === "POST") {
       return handleWebhook(req, env);
-    }
-
-    if (url.pathname === "/mcp") {
-      return handleMcpRequest(req, env);
     }
 
     if (url.pathname.startsWith("/tools/") && req.method === "POST") {

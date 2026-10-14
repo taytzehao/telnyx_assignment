@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Telnyx from "telnyx";
 import type {
   TestCreateParams,
+  TestUpdateParams,
   AssistantTest,
   TestRunResponse,
   RunTriggerParams,
@@ -23,20 +24,15 @@ export class EvalClient {
   }
 
   async createTest(scenario: TestScenario): Promise<AssistantTest> {
-    const params: TestCreateParams = {
-      name: scenario.name,
-      instructions: scenario.instructions,
-      rubric: scenario.rubric,
-      destination: scenario.destination,
-      telnyx_conversation_channel: scenario.telnyx_conversation_channel,
-      test_suite: scenario.test_suite,
-      ...(scenario.max_duration_seconds !== undefined && {
-        max_duration_seconds: scenario.max_duration_seconds,
-      }),
-    };
-    return this.client.ai.assistants.tests.create(params, {
+    return this.client.ai.assistants.tests.create(toTestParams(scenario), {
       idempotencyKey: randomUUID(),
     }) as Promise<AssistantTest>;
+  }
+
+  /** Overwrite a cached test's definition so scenario edits take effect. */
+  async updateTest(testId: string, scenario: TestScenario): Promise<AssistantTest> {
+    const params: TestUpdateParams = toTestParams(scenario);
+    return this.client.ai.assistants.tests.update(testId, params) as Promise<AssistantTest>;
   }
 
   async triggerRun(
@@ -59,4 +55,18 @@ export class EvalClient {
       params,
     ) as Promise<TestRunResponse>;
   }
+}
+
+function toTestParams(scenario: TestScenario): TestCreateParams {
+  return {
+    name: scenario.name,
+    instructions: scenario.instructions,
+    rubric: scenario.rubric,
+    destination: scenario.destination,
+    telnyx_conversation_channel: scenario.telnyx_conversation_channel,
+    test_suite: scenario.test_suite,
+    ...(scenario.max_duration_seconds !== undefined && {
+      max_duration_seconds: scenario.max_duration_seconds,
+    }),
+  };
 }

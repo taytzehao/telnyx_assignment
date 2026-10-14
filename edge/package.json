@@ -8,7 +8,6 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@telnyx/edge-runtime": "^0.16.0",
     "telnyx": "^7.25.0"
   },

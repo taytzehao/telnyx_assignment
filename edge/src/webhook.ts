@@ -4,13 +4,18 @@ import { getFlag } from "./lib/kv";
 
 interface WebhookPayload {
   call_session_id?: string;
-  caller_number?: string;
   current_node?: string;
+  /** Telnyx `assistant.initialization` event envelope. */
+  data?: {
+    payload?: {
+      telnyx_end_user_target?: string;
+      [key: string]: unknown;
+    };
+  };
   [key: string]: unknown;
 }
 
 interface DynamicVariables {
-  caller_number: string;
   call_session_id: string;
   current_node: string;
   call_count: number;
@@ -29,6 +34,11 @@ interface DynamicVariables {
  * CallSession actor, and returns dynamic variables that can influence
  * workflow routing (e.g. `is_returning_caller`, `escalation_enabled`).
  *
+ * The caller is identified by `data.payload.telnyx_end_user_target`. That is
+ * a Telnyx system variable (the `telnyx_` namespace is reserved), so it is
+ * read here but never echoed back in `dynamic_variables` — the workflow
+ * references `{{telnyx_end_user_target}}` directly.
+ *
  * The `greeting` variable is interpolated verbatim by the Greeting speak
  * node — the speak node delivers the text word-for-word without an LLM
  * turn, so the greeting content here is exactly what the caller hears.
@@ -38,7 +48,7 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
   const start = Date.now();
 
   const body = (await req.json().catch(() => ({}))) as WebhookPayload;
-  const callerNumber = body.caller_number ?? "unknown";
+  const callerNumber = body.data?.payload?.telnyx_end_user_target ?? "unknown";
   const callSessionId = body.call_session_id ?? "unknown";
   const currentNode = body.current_node ?? "unknown";
 
@@ -63,7 +73,6 @@ export async function handleWebhook(req: Request, env: Env): Promise<Response> {
     }
 
     const dynamicVars: DynamicVariables = {
-      caller_number: callerNumber,
       call_session_id: callSessionId,
       current_node: currentNode,
       call_count: callCount,

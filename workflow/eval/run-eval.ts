@@ -5,6 +5,7 @@ import { allClinicScenarios } from "./clinic-scenarios";
 import type { TestScenario } from "./types";
 import { EvalClient } from "./client";
 import { EvalRunner } from "./runner";
+import { EdgeCallerState } from "./caller-state";
 
 interface CliArgs {
   suite?: string;
@@ -116,8 +117,16 @@ async function main(): Promise<void> {
   }
   console.log(`  Destination: ${destination}\n`);
 
+  const edgeBaseUrl = process.env.ASSISTANT_CACHE;
+  if (!edgeBaseUrl) {
+    console.error(
+      "\u2717 ASSISTANT_CACHE is not set.\n  The eval resets each test caller's appointments through the edge, so it needs the edge base URL.",
+    );
+    process.exit(1);
+  }
+
   const client = new EvalClient();
-  const runner = new EvalRunner(client);
+  const runner = new EvalRunner(client, { callerState: new EdgeCallerState(edgeBaseUrl) });
 
   const results: ScenarioResult[] = [];
 
